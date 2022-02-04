@@ -1,17 +1,22 @@
 #include "lexer.hpp"
+#include "literals.hpp"
 #include "syntax_tree.hpp"
 #include <algorithm>
 #include <function_pipes.hpp>
 #include <iostream>
 #include <memory>
 #include <re2/re2.h>
+#include <stdexcept>
+#include <vector>
 
 namespace {
 using namespace cplang;
 using raw_statement = std::vector<token>;
-void remove_comments(std::string &contents) {
+void preprocess(std::string &contents) {
   RE2::Replace(&contents, "\\/\\/.+?\\n", " ");
   RE2::Replace(&contents, "\\/\\*[\\S\\s]+?\\*\\/", " ");
+  RE2::Replace(&contents, ";", "\n");
+  contents.push_back('\n');
 }
 
 auto token_parse(std::string &whole) {
@@ -19,7 +24,7 @@ auto token_parse(std::string &whole) {
   token cur_token;
   std::vector<token> token_list;
   while (RE2::FindAndConsume(
-      &input, "([^\\s(){}\\[\\];\"]+|\\(|\\)|{|}|\\[|\\]|(?:\".+\")|\\n)",
+      &input, "([^\\s(){}\\[\\]\"]+|\\(|\\)|{|}|\\[|\\]|(?:\".+\")|\\n)",
       &cur_token)) {
     token_list.push_back(cur_token);
   }
@@ -52,27 +57,52 @@ auto statement_parse(auto tokens) {
   return raw_statements;
 }
 
+const type &check_types(const auto &types, token_view check) {
+  for (const auto &t : types) {
+    if (t->getName() == check)
+      return *t;
+  }
+  if (check == byte_type.getName())
+    return byte_type;
+  return void_type;
+}
+
+
 } // namespace
 /* statement types:
 var decl: typename var
-struct def: struct typename{ stuff }*/
+struct def: struct typename{ stuff }
+funct def: typename function(typename param) {statements}
+*/
 namespace cplang {
-expression_list lex(const std::string &in, name_list &typenames) {
+expression_list lex(const std::string &in) {
   // who knows how many copy constructors this thing calls
   // need to optimize later TODOS
   auto statements = in | mtx::pipe([](auto f) {
-                      remove_comments(f);
+                      preprocess(f);
                       return f;
                     }) |
                     mtx::pipe([](auto f) { return token_parse(f); }) |
                     mtx::pipe([](auto t) { return statement_parse(t); });
   expression_list syntax_tree;
+  std::vector<type *> typelist;
   for (auto &statement : statements) {
-    if (std::count(typenames.begin(), typenames.end(), statement[0]) != 0) {
-      syntax_tree.emplace_back(
-          std::make_unique<var_decl>(statement[1], statement[0]));
+    if (statement.size() == 0)
+      continue;
+    if (statement[0] == reserved_tokens::struct_t) {
+      if (reserved_tokens::is_reserved(statement[1]))
+        throw std::runtime_error("token is reserved");
+      auto result = std::make_unique<struct_decl>(statement[1]);
+      typelist.push_back(result.get());
+      syntax_tree.emplace_back(std::move(result));
+    } else if (auto &t = check_types(typelist, statement[0]);
+               t.getName() != void_type.getName()) {
+      syntax_tree.emplace_back(std::make_unique<var_decl>(statement[1], t));
+    } else {
+      throw std::runtime_error("incomplete types");
     }
   }
   return syntax_tree;
 }
 } // namespace cplang
+  /* */
