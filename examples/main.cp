@@ -8,15 +8,15 @@ private:
   byte c;
   byte d;
 public:
-  void operator = (u32 RHS){
-    asm("mov %a %RHS")
+  void operator = (u32 next){
+    asm("mov %a %next")
   }
   operator literal(token lit){}
-  friend u32 operator + (u32 RHS){
+  friend u32 operator + (u32 next){
     asm("%3 = add nsw i32 %1, %0")
     asm("ret i32 %3")
   }
-  friend u32 operator - (u32 RHS){
+  friend u32 operator - (u32 next){
     asm("%3 = sub nsw i32 %1, %0")
     asm("ret i32 %3")
   }
