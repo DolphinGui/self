@@ -1,10 +1,11 @@
 #pragma once
 
+#include "container_types.hpp"
 #include "cp.hpp"
 
 namespace cplang {
-using token = std::string;
-using token_view = std::string_view;
+using token = string;
+using token_view = string_view;
 namespace reserved_tokens {
 inline constexpr token_view struct_t = "struct";
 inline constexpr token_view typename_t = "typename";
@@ -50,53 +51,64 @@ inline constexpr token_view typeid_t = "typeid";
 inline constexpr token_view void_t = "void";
 inline constexpr token_view while_t = "while";
 inline constexpr token_view byte_t = "byte";
+constexpr inline auto reserve_list = {
+    struct_t,
+    typename_t,
+    token_t,
+    return_t,
+    align_t,
+    break_t,
+    case_t,
+    catch_t,
+    compiletime_t,
+    runtime_t,
+    const_t,
+    volatile_t,
+    continue_t,
+    default_t,
+    delete_t,
+    do_t,
+    if_t,
+    else_t,
+    export_t,
+    import_t,
+    for_t,
+    goto_t,
+    friend_t,
+    inline_t,
+    muta_t,
+    namespace_t,
+    throw_t,
+    operator_t,
+    throws_t,
+    private_t,
+    protected_t,
+    public_t,
+    sizeof_t,
+    static_assert_t,
+    static_cast_t,
+    dynamic_cast_t,
+    reinterpert_cast_t,
+    switch_t,
+    try_t,
+    typedef_t,
+    typeid_t,
+    void_t,
+    while_t,
+    byte_t,
+};
+constexpr inline auto qualifier_list = {
+    align_t,  compiletime_t, runtime_t, const_t,  volatile_t, export_t,
+    import_t, for_t,         friend_t,  inline_t, muta_t};
 bool inline constexpr is_reserved(token_view t) {
-  for (auto a : {
-           struct_t,
-           typename_t,
-           token_t,
-           return_t,
-           align_t,
-           break_t,
-           case_t,
-           catch_t,
-           compiletime_t,
-           runtime_t,
-           const_t,
-           volatile_t,
-           continue_t,
-           default_t,
-           delete_t,
-           do_t,
-           if_t,
-           else_t,
-           export_t,
-           import_t,
-           for_t,
-           goto_t,
-           friend_t,
-           inline_t,
-           muta_t,
-           namespace_t,
-           throw_t,
-           operator_t,
-           throws_t,
-           private_t,
-           protected_t,
-           public_t,
-           sizeof_t,
-           static_assert_t,
-           static_cast_t,
-           dynamic_cast_t,
-           reinterpert_cast_t,
-           switch_t,
-           try_t,
-           typedef_t,
-           typeid_t,
-           void_t,
-           while_t,
-           byte_t,
-       }) {
+  for (auto a : reserve_list) {
+    if (a == t)
+      return true;
+  }
+  return false;
+}
+bool inline constexpr is_qualifier(token_view t) {
+  for (auto a : qualifier_list) {
     if (a == t)
       return true;
   }

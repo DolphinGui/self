@@ -1,108 +1,101 @@
 #include "lexer.hpp"
+#include "container_types.hpp"
+#include "fsa_parser.hpp"
 #include "literals.hpp"
 #include "syntax_tree.hpp"
 #include <algorithm>
+#include <boost/sml.hpp>
+#include <charconv>
+#include <cstddef>
 #include <function_pipes.hpp>
 #include <iostream>
 #include <memory>
+#include <ranges>
 #include <re2/re2.h>
+#include <rva/variant.hpp>
 #include <stdexcept>
-#include <vector>
+#include <system_error>
+#include <utility>
 
 namespace {
+
+template <typename T> using sm = boost::sml::sm<T>;
 using namespace cplang;
-using raw_statement = std::vector<token>;
-void preprocess(std::string &contents) {
+void preprocess(string &contents) {
+  RE2::Replace(&contents, "\\\n", " ");
   RE2::Replace(&contents, "\\/\\/.+?\\n", " ");
   RE2::Replace(&contents, "\\/\\*[\\S\\s]+?\\*\\/", " ");
   RE2::Replace(&contents, ";", "\n");
   contents.push_back('\n');
 }
 
-auto token_parse(std::string &whole) {
+auto token_parse(string &whole) {
   re2::StringPiece input(whole);
   token cur_token;
-  std::vector<token> token_list;
+  token_vec token_list;
   while (RE2::FindAndConsume(
-      &input, "([^\\s(){}\\[\\]\"]+|\\(|\\)|{|}|\\[|\\]|(?:\".+\")|\\n)",
+      &input,
+      "([^<>\\s(){},\\[\\]\"]+|\\(|\\)|{|}|\\[|\\]|(?:\".+\")|\\n|,|<|>)",
       &cur_token)) {
     token_list.push_back(cur_token);
   }
   return token_list;
 }
+
+auto statement_parse(token_vec &&tokens) {
+  token_vec token_list = std::move(tokens);
+  statement curr;
+  statement_vec statements;
+  // will have to fiddle with this in benchmarks
+  statements.reserve(token_list.size() / 3);
+  for (auto &t : token_list) {
+    if (t == "\n") {
+      if (!curr.empty()) {
+        statements.emplace_back(std::move(curr));
+        curr.clear();
+      }
+    } else if (t == "{" || t == "}" || t == ",") {
+      if (!curr.empty()) {
+        statements.emplace_back(std::move(curr));
+        curr.clear();
+      }
+      statements.emplace_back(statement{std::move(t)});
+    } else {
+      curr.emplace_back(std::move(t));
+      t.clear();
+    }
+  }
+  return statements;
+}
+
 auto read_file(std::istream &in) {
   in.seekg(std::ios_base::end);
   auto filesize = in.tellg();
   in.seekg(std::ios_base::beg);
-  std::string contents;
+  string contents;
   contents.reserve(filesize);
   in >> contents;
   return contents;
 }
-
-auto statement_parse(auto tokens) {
-  std::vector<raw_statement> raw_statements;
-  // I'm sure this horribly fragments memory
-  // but at this point I really don't care
-  // about performance
-  raw_statement cur;
-  for (int i = 0; i != tokens.size(); i++) {
-    if (tokens[i] != "\n") {
-      cur.push_back(tokens[i]);
-    } else {
-      raw_statements.push_back(cur);
-      cur.clear();
-    }
-  }
-  return raw_statements;
-}
-
-const type &check_types(const auto &types, token_view check) {
-  for (const auto &t : types) {
-    if (t->getName() == check)
-      return *t;
-  }
-  if (check == byte_type.getName())
-    return byte_type;
-  return void_type;
-}
-
+struct expression_v {
+  statement internal;
+};
 
 } // namespace
-/* statement types:
-var decl: typename var
-struct def: struct typename{ stuff }
-funct def: typename function(typename param) {statements}
-*/
 namespace cplang {
-expression_list lex(const std::string &in) {
+expression_list lex(const string &in) {
   // who knows how many copy constructors this thing calls
   // need to optimize later TODOS
-  auto statements = in | mtx::pipe([](auto f) {
-                      preprocess(f);
-                      return f;
-                    }) |
-                    mtx::pipe([](auto f) { return token_parse(f); }) |
-                    mtx::pipe([](auto t) { return statement_parse(t); });
-  expression_list syntax_tree;
-  std::vector<type *> typelist;
-  for (auto &statement : statements) {
-    if (statement.size() == 0)
-      continue;
-    if (statement[0] == reserved_tokens::struct_t) {
-      if (reserved_tokens::is_reserved(statement[1]))
-        throw std::runtime_error("token is reserved");
-      auto result = std::make_unique<struct_decl>(statement[1]);
-      typelist.push_back(result.get());
-      syntax_tree.emplace_back(std::move(result));
-    } else if (auto &t = check_types(typelist, statement[0]);
-               t.getName() != void_type.getName()) {
-      syntax_tree.emplace_back(std::make_unique<var_decl>(statement[1], t));
-    } else {
-      throw std::runtime_error("incomplete types");
-    }
-  }
-  return syntax_tree;
+  auto a = in | mtx::pipe([](auto &&f) {
+             preprocess(f);
+             return f;
+           }) |
+           mtx::pipe([](auto &&f) { return token_parse(f); }) |
+           mtx::pipe([](auto &&f) {
+             return statement_parse(std::forward<token_vec>(f));
+           }) |
+           mtx::pipe([](auto &&in) { return parse(in); });
+  using namespace std::literals;
 }
 } // namespace cplang
   /* */
