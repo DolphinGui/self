@@ -4,7 +4,7 @@
 #include <boost/sml.hpp>
 #include <syntax_tree.hpp>
 
-namespace cplang {
+namespace selflang {
 expression_list parse(statement_vec &in);
 
 }

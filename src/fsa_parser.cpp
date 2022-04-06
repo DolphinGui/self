@@ -4,13 +4,13 @@
 namespace {
 using namespace boost::sml::literals;
 auto init = *"start"_s;
-struct qualifier: public cplang::string_view{};
+struct qualifier: public selflang::string_view{};
 constexpr auto qualifier_event = boost::sml::event<qualifier>;
 struct var_literal{};
 constexpr auto var_literal_event = boost::sml::event<var_literal>;
 struct struct_literal{};
 constexpr auto struct_literal_event = boost::sml::event<struct_literal>;
-struct token: public cplang::string_view{};
+struct token: public selflang::string_view{};
 constexpr auto token_event = boost::sml::event<token>;
 
 struct parser {
@@ -26,7 +26,7 @@ struct parser {
 };
 } // namespace
 
-namespace cplang {
+namespace selflang {
 expression_list parse(statement_vec &in) {
   expression_list syntax_tree;
   type_list types;
@@ -37,4 +37,4 @@ expression_list parse(statement_vec &in) {
       const_cast<type_ref>(static_cast<const type *>(&byte_type)));
   
 }
-} // namespace cplang
+} // namespace selflang

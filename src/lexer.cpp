@@ -20,7 +20,7 @@
 namespace {
 
 template <typename T> using sm = boost::sml::sm<T>;
-using namespace cplang;
+using namespace selflang;
 void preprocess(string &contents) {
   RE2::Replace(&contents, "\\\n", " ");
   RE2::Replace(&contents, "\\/\\/.+?\\n", " ");
@@ -82,7 +82,7 @@ struct expression_v {
 };
 
 } // namespace
-namespace cplang {
+namespace selflang {
 expression_list lex(const string &in) {
   // who knows how many copy constructors this thing calls
   // need to optimize later TODOS
@@ -97,5 +97,5 @@ expression_list lex(const string &in) {
            mtx::pipe([](auto &&in) { return parse(in); });
   using namespace std::literals;
 }
-} // namespace cplang
+} // namespace selflang
   /* */

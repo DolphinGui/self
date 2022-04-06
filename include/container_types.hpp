@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace cplang{
+namespace selflang{
   using string = std::string;
   using string_view = std::string_view;
   template<typename type>

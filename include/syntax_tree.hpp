@@ -10,7 +10,7 @@
 
 #include <container_types.hpp>
 
-namespace cplang {
+namespace selflang {
 using token = string;
 using token_view = string_view;
 // there are declaration statements, and evaluative statements.

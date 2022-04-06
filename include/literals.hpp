@@ -3,7 +3,7 @@
 #include "container_types.hpp"
 #include "cp.hpp"
 
-namespace cplang {
+namespace selflang {
 using token = string;
 using token_view = string_view;
 namespace reserved_tokens {

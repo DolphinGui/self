@@ -4,6 +4,6 @@
 #include <string>
 #include <vector>
 // struct
-namespace cplang {
+namespace selflang {
 
 } // namespace cplang
