@@ -22,11 +22,10 @@ namespace {
 template <typename T> using sm = boost::sml::sm<T>;
 using namespace selflang;
 void preprocess(string &contents) {
-  RE2::Replace(&contents, "\\\n", " ");
-  RE2::Replace(&contents, "\\/\\/.+?\\n", " ");
-  RE2::Replace(&contents, "\\/\\*[\\S\\s]+?\\*\\/", " ");
-  RE2::Replace(&contents, ";", "\n");
-  contents.push_back('\n');
+  RE2::Replace(&contents, R"(\/\/.*?\n)", " ");
+  RE2::Replace(&contents, R"(\/\*[\S\s]*?\*\/)", " ");
+  RE2::Replace(&contents, "\n", ";");
+  contents.push_back(';');
 }
 
 auto token_parse(string &whole) {
@@ -35,37 +34,11 @@ auto token_parse(string &whole) {
   token_vec token_list;
   while (RE2::FindAndConsume(
       &input,
-      "([^<>\\s(){},\\[\\]\"]+|\\(|\\)|{|}|\\[|\\]|(?:\".+\")|\\n|,|<|>)",
+      R"(([^<>\s(){};,\[\]":]+|\(|\)|{|}|\[|\]|(?:".+")|;|,|<|>|:))",
       &cur_token)) {
     token_list.push_back(cur_token);
   }
   return token_list;
-}
-
-auto statement_parse(token_vec &&tokens) {
-  token_vec token_list = std::move(tokens);
-  statement curr;
-  statement_vec statements;
-  // will have to fiddle with this in benchmarks
-  statements.reserve(token_list.size() / 3);
-  for (auto &t : token_list) {
-    if (t == "\n") {
-      if (!curr.empty()) {
-        statements.emplace_back(std::move(curr));
-        curr.clear();
-      }
-    } else if (t == "{" || t == "}" || t == ",") {
-      if (!curr.empty()) {
-        statements.emplace_back(std::move(curr));
-        curr.clear();
-      }
-      statements.emplace_back(statement{std::move(t)});
-    } else {
-      curr.emplace_back(std::move(t));
-      t.clear();
-    }
-  }
-  return statements;
 }
 
 auto read_file(std::istream &in) {
@@ -86,15 +59,12 @@ namespace selflang {
 expression_list lex(const string &in) {
   // who knows how many copy constructors this thing calls
   // need to optimize later TODOS
-  auto a = in | mtx::pipe([](auto &&f) {
-             preprocess(f);
-             return f;
-           }) |
-           mtx::pipe([](auto &&f) { return token_parse(f); }) |
-           mtx::pipe([](auto &&f) {
-             return statement_parse(std::forward<token_vec>(f));
-           }) |
-           mtx::pipe([](auto &&in) { return parse(in); });
+  return in | mtx::pipe([](auto &&f) {
+           preprocess(f);
+           return f;
+         }) |
+         mtx::pipe([](auto &&f) { return token_parse(f); }) |
+         mtx::pipe([](auto &&in) { return parse(in); });
   using namespace std::literals;
 }
 } // namespace selflang

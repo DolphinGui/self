@@ -5,6 +5,6 @@
 #include <syntax_tree.hpp>
 
 namespace selflang {
-expression_list parse(statement_vec &in);
+expression_list parse(token_vec &in);
 
 }

@@ -11,6 +11,7 @@ using namespace boost::sml;
 using namespace boost::sml::literals;
 auto init = *"start"_s;
 constexpr auto event = boost::sml::event<view>;
+
 struct statemachine {
   using self = statemachine;
   uint level;

@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <container_types.hpp>
@@ -25,19 +26,9 @@ struct expression {
   friend std::ostream &operator<<(std::ostream &os, expression const &ex) {
     return ex.print(os);
   }
+  virtual token_view getName() const noexcept = 0;
 };
 
-struct type : public expression {
-  virtual ~type() = default;
-  virtual string_view getName() const noexcept = 0;
-};
-
-struct symbol : public expression {
-  virtual ~symbol() = default;
-  virtual string_view getName() const noexcept = 0;
-};
-
-using name_list = vector<std::unique_ptr<type>>;
 using expression_ptr = std::unique_ptr<expression>;
 using expression_list = vector<expression_ptr>;
 
@@ -60,6 +51,7 @@ struct namespace_tree : expression_tree {
     return out;
   }
 };
+
 template <typename T> class literal : public expression {
   T value;
 
@@ -70,84 +62,84 @@ public:
   }
 };
 
-using int_literal = literal<size_t>;
-using float_literal = literal<double>;
-
-class byte_type_t : public type {
-public:
-  byte_type_t() = default;
-  inline std::ostream &print(std::ostream &out) const override {
-    return out << "byte type";
-  }
-  string_view getName() const noexcept override { return "byte"; }
-};
-constexpr inline byte_type_t byte_type;
-
-class struct_type_t : public type {
-public:
-  struct_type_t() = default;
-  inline std::ostream &print(std::ostream &out) const override {
-    return out << "struct type";
-  }
-  string_view getName() const noexcept override { return "struct data"; }
-};
-constexpr inline struct_type_t struct_type_t;
-
-class void_type_t : public type {
-public:
-  void_type_t() = default;
-  inline std::ostream &print(std::ostream &out) const override {
-    return out << "void type";
-  }
-  string_view getName() const noexcept override { return "void"; }
-};
-constexpr inline void_type_t void_type;
-
-class var_decl : public symbol {
+class var_decl : public expression {
   token name;
-  const type &var_type;
 
 public:
-  var_decl(token_view name, const type &type) : name(name), var_type(type) {}
+  const var_decl *var_type = nullptr;
+  expression_ptr value;
+  var_decl(token_view name) : name(name) {}
+  var_decl(token_view name, const var_decl &type)
+      : name(name), var_type(&type) {}
+  var_decl(token_view name, expression_ptr &&value)
+      : name(name), value(std::move(value)) {}
+  var_decl(token_view name, const var_decl &type, expression_ptr &&value)
+      : name(name), var_type(&type), value(std::move(value)) {}
   token_view getName() const noexcept override { return name; }
   inline std::ostream &print(std::ostream &out) const override {
-    return out << "variable declaration: " << var_type.getName() << " " << name;
+    if (var_type)
+      return out << "variable declaration: " << var_type->getName() << ", "
+                 << name;
+    else
+      return out << "variable declaration: indeterminate type,  " << name;
   }
 };
+// name, type/value
+decltype(auto) var_decl_ptr(auto &&...args) {
+  return std::make_unique<var_decl>(std::forward<decltype(args)>(args)...);
+}
+using type_list = vector<const var_decl *>;
 
-struct funct_def : public symbol {
+struct funct_def : public expression {
   token name;
   expression_list args;
   expression_ptr body;
+  bool member = false;
 
-  funct_def(token_view name, expression_list &&args, expression_ptr &&body)
-      : name(name), args(std::move(args)), body(std::move(body)) {}
+  funct_def(token_view name, expression_list &&args, expression_ptr &&body,
+            bool member = false)
+      : name(name), args(std::move(args)), body(std::move(body)),
+        member(member) {}
+  funct_def(token_view name, auto &&...args)
+      : name(name), args({std::move(args)...}) {}
   inline std::ostream &print(std::ostream &out) const override {
     return out << "function declaration: " << name;
   }
   string_view getName() const noexcept override { return name; }
 };
+decltype(auto) funct_decl_ptr(auto &&...args) {
+  return std::make_unique<funct_def>(std::forward<decltype(args)>(args)...);
+}
 
-class struct_decl : public type {
-  token name;
+class operator_def : public funct_def {
+public:
+  operator_def(token_view name, std::unique_ptr<var_decl> &&LHS,
+               std::unique_ptr<var_decl> &&RHS, bool member = false)
+      : funct_def(name, std::move(LHS), std::move(RHS)) {
+    member = member;
+  }
+};
+decltype(auto) operator_decl_ptr(auto &&...args) {
+  return std::make_unique<operator_def>(std::forward<decltype(args)>(args)...);
+}
+class struct_def : public expression {
   expression_list body;
 
 public:
-  struct_decl(token_view name) : name(name) {}
-  struct_decl(token_view name, expression_list &&body)
-      : name(name), body(std::move(body)) {}
+  struct_def(expression_list &&body) : body(std::move(body)) {}
+  struct_def(auto &&...body) : body({std::move(body)...}) {}
   inline void define(expression_list &&body_list) {
     if (!body.empty())
       throw std::runtime_error("ODR defied");
     body = std::move(body_list);
   }
-  inline bool is_complete() const override { return !body.empty(); }
   inline std::ostream &print(std::ostream &out) const override {
-    return out << "struct declaration: " << name;
+    return out << "struct definition";
   }
-
-  string_view getName() const noexcept override { return name; }
 };
+decltype(auto) struct_def_ptr(auto &&...args) {
+  return std::make_unique<struct_def>(std::forward(args)...);
+}
 
 class var_ref : public expression {
   const var_decl &name;
@@ -165,8 +157,8 @@ class funct_call : public expression {
 
 public:
   funct_call(funct_def &Callee) : function(Callee) {}
-  funct_call(funct_def &Callee, expression_list &&Args)
-      : function(Callee), args(std::move(Args)) {}
+  funct_call(funct_def &callee, expression_list &&Args)
+      : function(callee), args(std::move(Args)) {}
   inline std::ostream &print(std::ostream &out) const override {
     return out << "function call: " << function;
   }
@@ -182,4 +174,4 @@ public:
   }
 };
 
-} // namespace cplang
+} // namespace selflang
