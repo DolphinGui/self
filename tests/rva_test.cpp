@@ -22,6 +22,7 @@ using vec = std::vector<int>;
 
 using variant = rva::variant<vec, std::vector<rva::self_t>>;
 using recursive_vec = std::vector<variant>;
+
 int main() {
   vec data;
   recursive_vec recursive;

@@ -81,8 +81,7 @@ bool inline constexpr is_keyword(token_view t) {
   }
   return false;
 }
-constexpr inline auto grammar = {";", ",", " ",  "<", ">",  "(", ")",
-                                 "{", "}", "\"", ":", "\\", "/"};
+constexpr inline auto grammar = {";", ",", " ", "(", ")", "{", "}", "\"", ":"};
 bool inline is_grammar(token_view t) {
   for (auto g : grammar) {
     if (t == g)

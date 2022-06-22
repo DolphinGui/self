@@ -1,5 +1,21 @@
-int main(){
+var ipaddr = struct {
+  var first: u8
+  var second: u8
+  var third: u8
+  var fourth: u8
+  fun make(string t){
+    var tuple = bat::string::split(t, .)
+    first = u8(tuple[0])
+    second = u8(tuple[1])
+    third = u8(tuple[2])
+    fourth = u8(tuple[3])
+  }
+}
+
+fun main() = {
   var a = 1 - 1
   var b: u32
+  var c = 1.2 - 3.1
+  var d = ipaddr("192.168.2.1")
   return a
 }

@@ -3,6 +3,7 @@
 #include <fmt/format.h>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 namespace {
@@ -45,11 +46,20 @@ struct statemachine {
 
 } // namespace
 using namespace std::literals;
-constexpr std::array list = {
+constexpr auto list = {
     "statement"sv, "("sv, "("sv, "statement"sv, ")"sv, ")"sv,
 };
+std::optional<std::unique_ptr<int>> b() { return std::make_unique<int>(5); }
+
+void f() {
+  auto a = b();
+  if (a) {
+    std::cout << *a.value().get() << '\n';
+  }
+}
 int main() {
   auto a = sm<statemachine>(statemachine{0});
   for (auto sv : list)
     a.process_event(sv);
+  f();
 }

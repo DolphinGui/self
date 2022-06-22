@@ -11,11 +11,15 @@ find_package(function_pipes REQUIRED)
 find_package(sml REQUIRED)
 find_package(fmt REQUIRED)
 find_package(rva REQUIRED)
+find_package(polymorphic_list REQUIRED)
+
+add_compile_options(-fsanitize=address)
+add_link_options(-fsanitize=address)
 
 add_library(selflib ${PROJECT_SRC}/lexer.cpp ${PROJECT_SRC}/fsa_parser.cpp)
 target_include_directories(selflib PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selflib PROPERTY CXX_STANDARD 20)
-target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes sml::sml rva::rva)
+target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes sml::sml rva::rva polymorphic_list::polymorphic_list)
 
 add_executable(selfc ${PROJECT_SRC}/selfc.cpp)
 target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)
