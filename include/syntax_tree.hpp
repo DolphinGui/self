@@ -45,8 +45,22 @@ struct expression {
 
 using expression_ptr = std::unique_ptr<expression>;
 using expression_list = vector<expression_ptr>;
+struct indirector : public expression {
+  expression_ptr inner;
+  indirector(expression *ptr) : inner(ptr) {}
+  indirector(expression_ptr &&ptr) : inner(std::move(ptr)) {}
+  ~indirector() = default;
+  indirector(indirector &&other) = default;
+  std::ostream &print(std::ostream &out) const override {
+    out << "indirector: ";
+    return inner->print(out);
+  }
+  bool is_complete() const override { return inner->is_complete(); }
 
-struct expression_tree : public expression, public poly::list<expression> {
+  token_view getName() const noexcept override { return inner->getName(); };
+};
+struct unevaluated_expression : public expression,
+                                public poly::list<expression> {
   inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
@@ -63,7 +77,7 @@ struct expression_tree : public expression, public poly::list<expression> {
     return "expression tree";
   }
 };
-struct namespace_tree : expression_tree {
+struct namespace_tree : unevaluated_expression {
   token name;
   inline std::ostream &print(std::ostream &out) const override {
     out << "namespace " << name << " contents:\n";
@@ -144,6 +158,7 @@ public:
       return out << "variable declaration: indeterminate type,  " << name;
   }
 };
+
 // name, type/value
 decltype(auto) var_decl_ptr(auto &&...args) {
   return std::make_unique<var_decl>(std::forward<decltype(args)>(args)...);

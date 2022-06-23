@@ -20,8 +20,9 @@ constexpr auto qualifier_guard = [](auto a) {
   return selflang::reserved::is_qualifier(a);
 };
 constexpr auto reserved_guard = [](auto t) {
-  return !selflang::reserved::is_reserved(t);
+  return !selflang::reserved::is_keyword(t);
 };
+constexpr auto endl_guard = [](auto t) { return t != ";"; };
 
 struct expression_parser {
   using self = expression_parser;
@@ -46,7 +47,7 @@ struct parser {
   // for large type lists.
   selflang::type_list types;
   selflang::vector<const selflang::expression *> symbols;
-  selflang::vector<selflang::expression_tree *> expressions;
+  selflang::vector<selflang::unevaluated_expression *> stack;
   selflang::var_decl *current;
   using self = parser;
   void add_var(selflang::token_view t) {
@@ -56,20 +57,39 @@ struct parser {
   }
 
   void expr_add_token(selflang::token_view t) {
-    auto &tree = dynamic_cast<selflang::expression_tree &>(*expressions.back());
-    tree.push_back(selflang::maybe_expression(t));
+    auto &tree =
+        dynamic_cast<selflang::unevaluated_expression &>(*syntax_tree.back());
+    if (t == "(") {
+      stack.back()->push_back(selflang::unevaluated_expression{});
+      stack.push_back(reinterpret_cast<selflang::unevaluated_expression *>(
+          &stack.back()->back()));
+    } else if (t == ")") {
+      stack.pop_back();
+    } else {
+      stack.back()->push_back(selflang::maybe_expression(t));
+    }
+  }
+
+  // todo: add proper compile error reporting later.
+  auto err_assert(bool condition) {
+    if (!condition)
+      throw std::runtime_error("assert failed.");
+  }
+
+  auto err_assert(bool condition, const char *message) {
+    if (!condition)
+      throw std::runtime_error(message);
   }
 
   void add_expr(selflang::token_view t) {
-    auto expr = (std::make_unique<selflang::expression_tree>());
+    auto expr = std::make_unique<selflang::unevaluated_expression>();
     // this just returns current, but current has more
-    bool this_should_be_true = (syntax_tree.back().release() == current);
-    if (!this_should_be_true)
-      throw std::runtime_error("corrupted expression tree.");
+    err_assert(syntax_tree.back().release() == current,
+               "syntax tree is corrupted");
     expr->push_back(std::move(*current));
     delete current;
     syntax_tree.pop_back();
-    expressions.push_back(expr.get());
+    stack.push_back(expr.get());
     syntax_tree.emplace_back(std::move(expr));
     expr_add_token(t);
   }
@@ -88,82 +108,41 @@ struct parser {
     symbols.push_back(&selflang::internal_divi);
   }
 
-  std::optional<std::variant<selflang::int_literal, selflang::fun_call>>
-  parse_symbol(auto *maybe, auto symbol) {
-    if (!maybe->is_complete()) {
-      if (symbol->getName() == maybe->get_token()) {
-        if (typeid(*symbol) == typeid(selflang::operator_def)) {
-          return selflang::fun_call(
-              dynamic_cast<const selflang::operator_def &>(*symbol));
-        }
-      } else if (auto [is_int, number] = is_integer(maybe->get_token());
-                 is_int) {
-        return selflang::int_literal(number);
-      }
-    }
-    return std::nullopt;
-  }
-  // todo: add proper compile error reporting later.
-  auto err_assert(bool condition) {
-    if (!condition)
-      throw std::runtime_error("assert failed.");
-  }
-  auto make_tree(auto uneval) {
-    auto &tree = dynamic_cast<selflang::expression_tree &>(*uneval);
-    auto contents = tree.dump_contents();
-    for (auto it = tree.begin(); it != tree.end(); ++it) {
-      auto *maybe = dynamic_cast<selflang::maybe_expression *>(&(*it));
-      if (maybe)
-        for (auto symbol : symbols) {
-          auto result = parse_symbol(maybe, symbol);
-          if (result) {
-            if (result->index() == 0) {
-              using T = std::decay_t<decltype(std::get<0>(result.value()))>;
-              tree.replace_emplace<T>(it,
-                                      std::move(std::get<0>(result.value())));
-            } else if (result->index() == 1) {
-              using T = std::decay_t<decltype(std::get<1>(result.value()))>;
-              tree.replace_emplace<T>(it,
-                                      std::move(std::get<1>(result.value())));
-            } else {
-              throw std::runtime_error("I don't know how this happened.");
+  selflang::expression_ptr
+  evaluate_tree(selflang::unevaluated_expression &uneval);
+
+  void parse_symbol(auto *base, auto &it, auto &tree) {
+    if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base); maybe) {
+      for (auto symbol : symbols) {
+        if (maybe && !maybe->is_complete()) {
+          if (symbol->getName() == maybe->get_token()) {
+            if (typeid(*symbol) == typeid(selflang::operator_def)) {
+              tree.template replace_emplace<selflang::fun_call>(
+                  it, dynamic_cast<const selflang::operator_def &>(*symbol));
             }
+            break;
+          } else if (auto [is_int, number] = is_integer(maybe->get_token());
+                     is_int) {
+            tree.template replace_emplace<selflang::int_literal>(it, number);
             break;
           }
         }
-    }
-
-    for (auto it = tree.begin(); it != tree.end(); ++it) {
-      contents = tree.dump_contents();
-      if (auto *a = dynamic_cast<selflang::fun_call *>(&(*it)); a) {
-        if (!a->get_def().is_member()) {
-          auto lhs = it;
-          auto rhs = it;
-          --lhs;
-          ++rhs;
-          a->add_arg(tree.pop(lhs));
-          a->add_arg(tree.pop(rhs));
-        }
       }
-    }
-
-    for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
-      if (auto *a = dynamic_cast<selflang::fun_call *>(&(*it)); a) {
-        if (a->get_def().is_member()) {
-          auto lhs = it;
-          auto rhs = it;
-          ++lhs;
-          --rhs;
-          a->add_arg(tree.pop(rhs));
-          a->add_arg(tree.pop(lhs));
-        }
-      }
+    } else if (auto *uneval =
+                   dynamic_cast<selflang::unevaluated_expression *>(base);
+               uneval) {
+      tree.template replace_emplace<selflang::indirector>(
+          it, evaluate_tree(*uneval));
     }
   }
 
   void eval_expressions() {
-    for (auto uneval : expressions) {
-      make_tree(uneval);
+    for (auto &t : syntax_tree) {
+      if (auto *tree =
+              dynamic_cast<selflang::unevaluated_expression *>(t.get());
+          tree) {
+        t.reset(evaluate_tree(*tree).release());
+      }
     }
   }
 
@@ -191,19 +170,60 @@ struct parser {
         "var named"_s + event<token_view>[([](auto t) { return t == ":"; })] =
             "type annotation"_s,
         "type annotation"_s + event<token_view> / &self::add_type = "end var"_s,
-        "end var"_s + event<token_view>[([](auto t) { return t == ";"; })] /
-                          [] { std::cout << "endl\n"; } = "init"_s,
-        "var named"_s + event<token_view>[reserved_guard] / &self::add_expr =
-            "var expression"_s,
-        "var expression"_s + event<token_view>[reserved_guard] /
+        "end var"_s + event<token_view>[!endl_guard] = "init"_s,
+        "var named"_s + event<token_view>[reserved_guard && endl_guard] /
+                            &self::add_expr = "var expression"_s,
+        "var expression"_s + event<token_view>[reserved_guard && endl_guard] /
                                  &self::expr_add_token = "var expression"_s,
-        "var expression"_s +
-            event<token_view>[([](auto t) { return t == ";"; })] /
-                [] { std::cout << "endl\n"; } = "init"_s,
+        "var expression"_s + event<token_view>[!endl_guard] = "init"_s,
         "init"_s + event<eof> / &self::eval_expressions);
   }
 };
+selflang::expression_ptr
+parser::evaluate_tree(selflang::unevaluated_expression &uneval) {
+  auto &tree = dynamic_cast<selflang::unevaluated_expression &>(uneval);
+  for (auto it = tree.begin(); it != tree.end(); ++it) {
+    parse_symbol(&(*it), it, tree);
+  }
 
+  const auto remove_indirection = [](selflang::expression_ptr &ptr) {
+    if (auto *indirector = dynamic_cast<selflang::indirector *>(ptr.get());
+        indirector) {
+      ptr.reset(indirector->inner.release());
+    }
+  };
+
+  for (auto it = tree.begin(); it != tree.end(); ++it) {
+    if (auto *a = dynamic_cast<selflang::fun_call *>(&(*it)); a) {
+      if (!a->get_def().is_member()) {
+        auto lhs = it, rhs = it;
+        --lhs, ++rhs;
+        auto left = tree.pop(lhs), right = tree.pop(rhs);
+        remove_indirection(left);
+        remove_indirection(right);
+        a->add_arg(std::move(left));
+        a->add_arg(std::move(right));
+      }
+    }
+  }
+
+  for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
+    if (auto *a = dynamic_cast<selflang::fun_call *>(&(*it)); a) {
+      if (a->get_def().is_member()) {
+        auto lhs = it, rhs = it;
+        --lhs, ++rhs;
+        auto left = tree.pop(lhs), right = tree.pop(rhs);
+        remove_indirection(left);
+        remove_indirection(right);
+        a->add_arg(std::move(right));
+        a->add_arg(std::move(left));
+      }
+    }
+  }
+
+  err_assert(tree.size() == 1, "tree is not fully resolved");
+  return tree.pop_front();
+}
 } // namespace
 
 namespace selflang {
