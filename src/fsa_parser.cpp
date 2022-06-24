@@ -15,6 +15,11 @@
 #include <variant>
 
 namespace {
+auto is_integer(selflang::token_view t) {
+  char *p;
+  auto number = strtol(t.data(), &p, 10);
+  return std::pair{*p == 0, number};
+}
 using namespace boost::sml::literals;
 constexpr auto qualifier_guard = [](auto a) {
   return selflang::reserved::is_qualifier(a);
@@ -22,43 +27,26 @@ constexpr auto qualifier_guard = [](auto a) {
 constexpr auto reserved_guard = [](auto t) {
   return !selflang::reserved::is_keyword(t);
 };
-constexpr auto endl_guard = [](auto t) { return t != ";"; };
-
-struct expression_parser {
-  using self = expression_parser;
-  auto operator()() const noexcept {
-    using namespace boost::sml;
-    using namespace selflang;
-    using namespace selflang::reserved;
-    return make_transition_table("init"_s + event<token_view> = "state"_s);
-  }
-};
-struct eof {};
-
-auto is_integer(selflang::token_view t) {
-  char *p;
-  auto number = strtol(t.data(), &p, 10);
-  return std::pair{*p == 0, number};
-}
-struct parser {
-  // syntax tree must be first because of initialization rules
+constexpr auto endl = [](auto t) { return t == ";"; };
+constexpr auto open_paren = [](auto t) { return t == "("; };
+constexpr auto close_paren = [](auto t) { return t == ")"; };
+constexpr auto arrow = [](auto t) { return t == "->"; };
+constexpr auto open_bracket = [](auto t) { return t == "{"; };
+constexpr auto close_bracket = [](auto t) { return t == "}"; };
+struct context {
   selflang::expression_list &syntax_tree;
-  // might want to make this a dictionary instead of a list. might scale better
-  // for large type lists.
-  selflang::type_list types;
-  selflang::vector<const selflang::expression *> symbols;
+  selflang::type_list &types;
+  selflang::vector<const selflang::expression *> &symbols;
+};
+struct expression_parser {
+  context c;
   selflang::vector<selflang::unevaluated_expression *> stack;
-  selflang::var_decl *current;
-  using self = parser;
-  void add_var(selflang::token_view t) {
-    auto result = std::make_unique<selflang::var_decl>(t);
-    current = result.get();
-    syntax_tree.emplace_back(std::move(result));
-  }
-
+  selflang::expression **current;
+  selflang::token_view &passthrough;
+  using eself = expression_parser;
   void expr_add_token(selflang::token_view t) {
     auto &tree =
-        dynamic_cast<selflang::unevaluated_expression &>(*syntax_tree.back());
+        dynamic_cast<selflang::unevaluated_expression &>(*c.syntax_tree.back());
     if (t == "(") {
       stack.back()->push_back(selflang::unevaluated_expression{});
       stack.push_back(reinterpret_cast<selflang::unevaluated_expression *>(
@@ -84,28 +72,16 @@ struct parser {
   void add_expr(selflang::token_view t) {
     auto expr = std::make_unique<selflang::unevaluated_expression>();
     // this just returns current, but current has more
-    err_assert(syntax_tree.back().release() == current,
-               "syntax tree is corrupted");
-    expr->push_back(std::move(*current));
-    delete current;
-    syntax_tree.pop_back();
-    stack.push_back(expr.get());
-    syntax_tree.emplace_back(std::move(expr));
+    if (*current) {
+      err_assert(c.syntax_tree.back().release() == *current,
+                 "syntax tree is corrupted");
+      expr->push_back(selflang::indirector(*current));
+      c.syntax_tree.pop_back();
+      stack.push_back(expr.get());
+    }
+    c.syntax_tree.emplace_back(std::move(expr));
+    expr_add_token(passthrough);
     expr_add_token(t);
-  }
-
-  // I normally dislike doing this, but I can't seem to figure out why
-  // defining a constructor breaks this.
-  void setup() {
-    types.push_back(&selflang::void_type);
-    types.push_back(&selflang::byte_type);
-    types.push_back(&selflang::type_var);
-    types.push_back(&selflang::int_token_t);
-    symbols.push_back(&selflang::int_token_assignment);
-    symbols.push_back(&selflang::internal_addi);
-    symbols.push_back(&selflang::internal_subi);
-    symbols.push_back(&selflang::internal_muli);
-    symbols.push_back(&selflang::internal_divi);
   }
 
   selflang::expression_ptr
@@ -113,8 +89,8 @@ struct parser {
 
   void parse_symbol(auto *base, auto &it, auto &tree) {
     if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base); maybe) {
-      for (auto symbol : symbols) {
-        if (maybe && !maybe->is_complete()) {
+      if (maybe && !maybe->is_complete()) {
+        for (auto symbol : c.symbols) {
           if (symbol->getName() == maybe->get_token()) {
             if (typeid(*symbol) == typeid(selflang::operator_def)) {
               tree.template replace_emplace<selflang::fun_call>(
@@ -136,56 +112,76 @@ struct parser {
     }
   }
 
-  void eval_expressions() {
-    for (auto &t : syntax_tree) {
-      if (auto *tree =
-              dynamic_cast<selflang::unevaluated_expression *>(t.get());
-          tree) {
-        t.reset(evaluate_tree(*tree).release());
-      }
+  void evaluate() {
+    auto &t = c.syntax_tree.back();
+    if (auto *tree = dynamic_cast<selflang::unevaluated_expression *>(t.get());
+        tree) {
+      t.reset(evaluate_tree(*tree).release());
+      return;
     }
-  }
-
-  void add_type(selflang::token_view t) {
-    for (auto &type : types) {
-      if (type->getName() == t) {
-        // this assumes the variable created is on the back
-        current->var_type = type;
-        return;
-      }
-    }
+    err_assert(false, "tree corrupted somehow.");
   }
 
   auto operator()() const noexcept {
+    using self = expression_parser;
     using namespace boost::sml;
     using namespace selflang;
     using namespace selflang::reserved;
     return make_transition_table(
-        *"start"_s / &self::setup = "init"_s,
-        "init"_s + event<token_view>[qualifier_guard] = "init"_s,
-        "init"_s + event<token_view>[([](auto a) { return a == var_t; })] =
-            "var decl"_s,
-        "var decl"_s + event<token_view>[reserved_guard] / &self::add_var =
+        *"init"_s + event<token_view>[reserved_guard && !endl] /
+                        &self::add_expr = "start"_s,
+        "start"_s + event<token_view>[reserved_guard && !endl] /
+                        &self::expr_add_token = "start"_s,
+        "start"_s + event<token_view>[endl] / &self::evaluate = X);
+  }
+};
+struct var_parser {
+  context c;
+  selflang::expression *current;
+  selflang::token_view current_token;
+
+  using self = expression_parser;
+
+  void pass_token(selflang::token_view t) { current_token = t; }
+
+  void add_var(selflang::token_view t) {
+    auto result = std::make_unique<selflang::var_decl>(t);
+    current = result.get();
+    c.syntax_tree.emplace_back(std::move(result));
+  }
+
+  void add_type(selflang::token_view t) {
+    for (auto &type : c.types) {
+      if (type->getName() == t) {
+        // this assumes the variable created is on the back
+        reinterpret_cast<selflang::var_decl *>(current)->var_type = type;
+        return;
+      }
+    }
+  }
+  auto operator()() const noexcept {
+    using self = var_parser;
+    using namespace boost::sml;
+    using namespace selflang;
+    using namespace selflang::reserved;
+    return make_transition_table(
+        *"var decl"_s + event<token_view>[reserved_guard] / &self::add_var =
             "var named"_s,
         "var named"_s + event<token_view>[([](auto t) { return t == ":"; })] =
             "type annotation"_s,
         "type annotation"_s + event<token_view> / &self::add_type = "end var"_s,
-        "end var"_s + event<token_view>[!endl_guard] = "init"_s,
-        "var named"_s + event<token_view>[reserved_guard && endl_guard] /
-                            &self::add_expr = "var expression"_s,
-        "var expression"_s + event<token_view>[reserved_guard && endl_guard] /
-                                 &self::expr_add_token = "var expression"_s,
-        "var expression"_s + event<token_view>[!endl_guard] = "init"_s,
-        "init"_s + event<eof> / &self::eval_expressions);
+        "end var"_s + event<token_view>[endl] = X,
+        "var named"_s + event<token_view>[reserved_guard && !endl] /
+                            &self::pass_token = state<expression_parser>,
+        state<expression_parser> = X);
   }
 };
 selflang::expression_ptr
-parser::evaluate_tree(selflang::unevaluated_expression &uneval) {
+expression_parser::evaluate_tree(selflang::unevaluated_expression &uneval) {
   auto &tree = dynamic_cast<selflang::unevaluated_expression &>(uneval);
   for (auto it = tree.begin(); it != tree.end(); ++it) {
     parse_symbol(&(*it), it, tree);
   }
-
   const auto remove_indirection = [](selflang::expression_ptr &ptr) {
     if (auto *indirector = dynamic_cast<selflang::indirector *>(ptr.get());
         indirector) {
@@ -220,21 +216,91 @@ parser::evaluate_tree(selflang::unevaluated_expression &uneval) {
       }
     }
   }
-
   err_assert(tree.size() == 1, "tree is not fully resolved");
   return tree.pop_front();
 }
+struct fun_parser {};
+struct parser {
+  // syntax tree must be first because of initialization rules
+  selflang::expression_list &syntax_tree;
+  // might want to make this a dictionary instead of a list. might scale better
+  // for large type lists.
+  selflang::type_list types;
+  selflang::vector<const selflang::expression *> symbols;
+  using self = parser;
+
+  void add_fun(selflang::token_view t) {
+    auto result = std::make_unique<selflang::fun_def>(t);
+    // current = result.get();
+    syntax_tree.emplace_back(std::move(result));
+  }
+
+  void name_fun(selflang::token_view t) {
+    // dynamic_cast<selflang::fun_def &>(*current).name = t;
+  }
+
+  // todo: add proper compile error reporting later.
+  auto err_assert(bool condition) {
+    if (!condition)
+      throw std::runtime_error("assert failed.");
+  }
+
+  auto err_assert(bool condition, const char *message) {
+    if (!condition)
+      throw std::runtime_error(message);
+  }
+
+  // I normally dislike doing this, but I can't seem to figure out why
+  // defining a constructor breaks this.
+  void setup() {
+    types.push_back(&selflang::void_type);
+    types.push_back(&selflang::byte_type);
+    types.push_back(&selflang::type_var);
+    types.push_back(&selflang::int_token_t);
+    symbols.push_back(&selflang::int_token_assignment);
+    symbols.push_back(&selflang::internal_addi);
+    symbols.push_back(&selflang::internal_subi);
+    symbols.push_back(&selflang::internal_muli);
+    symbols.push_back(&selflang::internal_divi);
+  }
+
+  auto operator()() const noexcept {
+    using namespace boost::sml;
+    using namespace selflang;
+    using namespace selflang::reserved;
+    return make_transition_table(
+        *"start"_s / &self::setup = "init"_s,
+        "init"_s + event<token_view>[qualifier_guard] = "init"_s,
+        "init"_s + event<token_view>[([](auto a) { return a == var_t; })] =
+            state<var_parser>,
+        state<var_parser> = "init"_s,
+        "init"_s + event<token_view>[([](auto t) { return t == fun_t; })] /
+                       &self::add_fun = "fun decl"_s,
+        "fun decl"_s + event<token_view>[reserved_guard] / &self::name_fun =
+            "named fun"_s,
+        "named fun"_s + event<token_view>[open_paren] = "args"_s,
+        "args"_s + event<token_view>[close_paren] = "end args"_s,
+        "end args"_s + event<token_view>[arrow] = "fun type"_s,
+        "fun type"_s + event<token_view>[open_bracket] = "fun"_s,
+        "fun"_s + event<token_view>[close_bracket] = "init"_s);
+  }
+};
 } // namespace
 
 namespace selflang {
 expression_list parse(token_vec &in) {
   expression_list syntax_tree;
   auto dep = parser{syntax_tree};
-  auto fsa = boost::sml::sm<parser>(dep);
+  auto c = context{
+      .syntax_tree = syntax_tree, .types = dep.types, .symbols = dep.symbols};
+  auto vardeps = var_parser{.c = c};
+  auto depdep = expression_parser{.c = c,
+                                  .current = &(vardeps.current),
+                                  .passthrough = vardeps.current_token};
+  auto fsa = boost::sml::sm<parser>(dep, vardeps, depdep);
   for (token_view token : in) {
     fsa.process_event(token);
   }
-  fsa.process_event(eof{});
   return syntax_tree;
 }
 } // namespace selflang

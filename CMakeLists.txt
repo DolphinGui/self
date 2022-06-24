@@ -13,13 +13,20 @@ find_package(fmt REQUIRED)
 find_package(rva REQUIRED)
 find_package(polymorphic_list REQUIRED)
 
+find_package(LLVM REQUIRED CONFIG)
+include_directories(${LLVM_INCLUDE_DIRS})
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+add_definitions(${LLVM_DEFINITIONS_LIST})
+
+llvm_map_components_to_libnames(llvm_libs support core)
+
 add_compile_options(-fsanitize=address)
 add_link_options(-fsanitize=address)
 
 add_library(selflib ${PROJECT_SRC}/lexer.cpp ${PROJECT_SRC}/fsa_parser.cpp)
 target_include_directories(selflib PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selflib PROPERTY CXX_STANDARD 20)
-target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes sml::sml rva::rva polymorphic_list::polymorphic_list)
+target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes sml::sml rva::rva polymorphic_list::polymorphic_list ${llvm_libs})
 
 add_executable(selfc ${PROJECT_SRC}/selfc.cpp)
 target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)

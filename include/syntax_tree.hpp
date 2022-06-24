@@ -169,16 +169,13 @@ struct fun_def : public expression {
   token name;
   expression_list arguments;
   expression_ptr body;
-  const var_decl &return_type;
+  var_decl const *return_type;
   bool member = false;
 
-  fun_def(token_view name, const var_decl &return_type, expression_list &&args,
-          expression_ptr &&body, bool member = false)
-      : name(name), arguments(std::move(args)), body(std::move(body)),
-        member(member), return_type(return_type) {}
+  fun_def(token_view name, bool member = false) : name(name), member(member) {}
   fun_def(token_view name, const var_decl &return_type, bool member = false,
           auto &&...args)
-      : name(name), return_type(return_type), member(member) {
+      : name(name), return_type(&return_type), member(member) {
     arguments.reserve(sizeof...(args));
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
