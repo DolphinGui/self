@@ -39,7 +39,7 @@ target_link_libraries(regex_test re2::re2)
 
 add_executable(lex_test ${CMAKE_SOURCE_DIR}/tests/lex_test.cpp)
 set_property(TARGET lex_test PROPERTY CXX_STANDARD 20)
-target_link_libraries(lex_test selflib)
+target_link_libraries(lex_test selflib fmt::fmt)
 
 add_executable(sml_test ${CMAKE_SOURCE_DIR}/tests/sml_test.cpp)
 set_property(TARGET sml_test PROPERTY CXX_STANDARD 20)

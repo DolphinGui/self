@@ -5,14 +5,8 @@
 #include "literals.hpp"
 #include "syntax_tree.hpp"
 #include <boost/sml.hpp>
-#include <cctype>
-#include <cstdlib>
 #include <iostream>
-#include <memory>
-#include <optional>
-#include <stdexcept>
-#include <utility>
-#include <variant>
+#include <queue>
 
 namespace {
 auto is_integer(selflang::token_view t) {
@@ -25,7 +19,8 @@ constexpr auto qualifier_guard = [](auto a) {
   return selflang::reserved::is_qualifier(a);
 };
 constexpr auto reserved_guard = [](auto t) {
-  return !selflang::reserved::is_keyword(t);
+  return !selflang::reserved::is_keyword(t) &&
+         !selflang::reserved::is_grammar(t);
 };
 constexpr auto endl = [](auto t) { return t == ";"; };
 constexpr auto open_paren = [](auto t) { return t == "("; };
@@ -33,6 +28,10 @@ constexpr auto close_paren = [](auto t) { return t == ")"; };
 constexpr auto arrow = [](auto t) { return t == "->"; };
 constexpr auto open_bracket = [](auto t) { return t == "{"; };
 constexpr auto close_bracket = [](auto t) { return t == "}"; };
+constexpr auto comma = [](auto t) { return t == ","; };
+constexpr auto var = [](auto t) { return t == selflang::reserved::var_t; };
+constexpr auto fun = [](auto t) { return t == selflang::reserved::fun_t; };
+constexpr static auto token_event = boost::sml::event<selflang::token_view>;
 struct context {
   selflang::expression_list &syntax_tree;
   selflang::type_list &types;
@@ -128,11 +127,11 @@ struct expression_parser {
     using namespace selflang;
     using namespace selflang::reserved;
     return make_transition_table(
-        *"init"_s + event<token_view>[reserved_guard && !endl] /
-                        &self::add_expr = "start"_s,
-        "start"_s + event<token_view>[reserved_guard && !endl] /
+        *"init"_s + token_event[reserved_guard && !endl] / &self::add_expr =
+            "start"_s,
+        "start"_s + token_event[reserved_guard && !endl] /
                         &self::expr_add_token = "start"_s,
-        "start"_s + event<token_view>[endl] / &self::evaluate = X);
+        "start"_s + token_event[endl || comma] / &self::evaluate = X);
   }
 };
 struct var_parser {
@@ -159,19 +158,20 @@ struct var_parser {
       }
     }
   }
+
   auto operator()() const noexcept {
     using self = var_parser;
     using namespace boost::sml;
     using namespace selflang;
     using namespace selflang::reserved;
     return make_transition_table(
-        *"var decl"_s + event<token_view>[reserved_guard] / &self::add_var =
+        *"var decl"_s + token_event[reserved_guard] / &self::add_var =
             "var named"_s,
-        "var named"_s + event<token_view>[([](auto t) { return t == ":"; })] =
+        "var named"_s + token_event[([](auto t) { return t == ":"; })] =
             "type annotation"_s,
-        "type annotation"_s + event<token_view> / &self::add_type = "end var"_s,
-        "end var"_s + event<token_view>[endl] = X,
-        "var named"_s + event<token_view>[reserved_guard && !endl] /
+        "type annotation"_s + token_event / &self::add_type = "end var"_s,
+        "end var"_s + token_event[endl] = X,
+        "var named"_s + token_event[reserved_guard && !endl] /
                             &self::pass_token = state<expression_parser>,
         state<expression_parser> = X);
   }
@@ -219,26 +219,41 @@ expression_parser::evaluate_tree(selflang::unevaluated_expression &uneval) {
   err_assert(tree.size() == 1, "tree is not fully resolved");
   return tree.pop_front();
 }
-struct fun_parser {};
-struct parser {
+struct fun_parser {
+  context c;
+  auto operator()() const noexcept {
+    using self = fun_parser;
+    using namespace boost::sml;
+    using namespace selflang;
+    using namespace selflang::reserved;
+    return make_transition_table(
+        *"fun decl"_s + token_event[reserved_guard] = "fun named"_s,
+        "fun named"_s + token_event[open_paren] = "args"_s,
+        "args"_s + token_event[reserved_guard] = "arg named"_s,
+        "arg named"_s + token_event[([](auto t) { return t == ":"; })] =
+            "arg type"_s,
+        "arg type"_s + token_event[reserved_guard] = "arg typed"_s,
+        "arg typed"_s + token_event[comma] = "args"_s,
+        "args"_s + token_event[close_paren] = "args defined"_s,
+        "args defined"_s + token_event[arrow] = "ret type"_s,
+        "ret type"_s + token_event[reserved_guard] = "pre declared"_s,
+        "pre declared"_s + token_event[open_bracket] = "body"_s,
+        "args defined"_s + token_event[open_bracket] = "body"_s,
+        "body"_s + token_event[reserved_guard] = state<expression_parser>,
+        state<expression_parser> = "body"_s,
+        "body"_s + token_event[var] = state<var_parser>,
+        state<var_parser> = "body"_s,
+        "body"_s + token_event[close_bracket] = X);
+  }
+};
+struct global_parser {
   // syntax tree must be first because of initialization rules
   selflang::expression_list &syntax_tree;
   // might want to make this a dictionary instead of a list. might scale better
   // for large type lists.
   selflang::type_list types;
   selflang::vector<const selflang::expression *> symbols;
-  using self = parser;
-
-  void add_fun(selflang::token_view t) {
-    auto result = std::make_unique<selflang::fun_def>(t);
-    // current = result.get();
-    syntax_tree.emplace_back(std::move(result));
-  }
-
-  void name_fun(selflang::token_view t) {
-    // dynamic_cast<selflang::fun_def &>(*current).name = t;
-  }
-
+  using self = global_parser;
   // todo: add proper compile error reporting later.
   auto err_assert(bool condition) {
     if (!condition)
@@ -270,19 +285,11 @@ struct parser {
     using namespace selflang::reserved;
     return make_transition_table(
         *"start"_s / &self::setup = "init"_s,
-        "init"_s + event<token_view>[qualifier_guard] = "init"_s,
-        "init"_s + event<token_view>[([](auto a) { return a == var_t; })] =
-            state<var_parser>,
+        "init"_s + token_event[qualifier_guard] = "init"_s,
+        "init"_s + token_event[var] = state<var_parser>,
         state<var_parser> = "init"_s,
-        "init"_s + event<token_view>[([](auto t) { return t == fun_t; })] /
-                       &self::add_fun = "fun decl"_s,
-        "fun decl"_s + event<token_view>[reserved_guard] / &self::name_fun =
-            "named fun"_s,
-        "named fun"_s + event<token_view>[open_paren] = "args"_s,
-        "args"_s + event<token_view>[close_paren] = "end args"_s,
-        "end args"_s + event<token_view>[arrow] = "fun type"_s,
-        "fun type"_s + event<token_view>[open_bracket] = "fun"_s,
-        "fun"_s + event<token_view>[close_bracket] = "init"_s);
+        "init"_s + token_event[fun] = state<fun_parser>,
+        state<fun_parser> = "init"_s, "init"_s + token_event[endl]);
   }
 };
 } // namespace
@@ -290,14 +297,15 @@ struct parser {
 namespace selflang {
 expression_list parse(token_vec &in) {
   expression_list syntax_tree;
-  auto dep = parser{syntax_tree};
+  auto dep = global_parser{syntax_tree};
   auto c = context{
       .syntax_tree = syntax_tree, .types = dep.types, .symbols = dep.symbols};
   auto vardeps = var_parser{.c = c};
-  auto depdep = expression_parser{.c = c,
-                                  .current = &(vardeps.current),
-                                  .passthrough = vardeps.current_token};
-  auto fsa = boost::sml::sm<parser>(dep, vardeps, depdep);
+  auto exprdeps = expression_parser{.c = c,
+                                    .current = &(vardeps.current),
+                                    .passthrough = vardeps.current_token};
+  auto fundeps = fun_parser{.c = c};
+  auto fsa = boost::sml::sm<global_parser>(dep, vardeps, fundeps, exprdeps);
   for (token_view token : in) {
     fsa.process_event(token);
   }
