@@ -1,22 +1,18 @@
 #pragma once
-
-#include <cstddef>
-#include <initializer_list>
-#include <memory>
-#include <ostream>
 #include <sstream>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <type_traits>
-#include <utility>
-#include <variant>
-#include <vector>
 
 #include <polymorphic_list/list.hpp>
 
 #include "container_types.hpp"
-
+// I hate that I have to do this but it's the only way to keep my
+// sanity doing all this
+#define SELF_SUBCALL_MACRO(NAME, FUNCTION, TYPE)                               \
+  void NAME(TYPE a) override { FUNCTION }
+#define SUBCALL_PROTOTYPE(NAME, TYPE) virtual void NAME(TYPE) = 0;
+#define PUSH_BACK a.push_back(std::move(*this));
+#define SUB_METHODS                                                            \
+  SELF_SUBCALL_MACRO(move_into, PUSH_BACK, poly::list<expression> &)
+#define BASE_PROTOTYPES SUBCALL_PROTOTYPE(move_into, poly::list<expression> &)
 namespace selflang {
 namespace detail {
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }
@@ -41,6 +37,9 @@ struct expression {
     return ex.print(os);
   }
   virtual token_view getName() const noexcept = 0;
+  // TODO: this can be made much less redundant by using the
+  // deducing this from c++23. I don't have that rn, so for now
+  // this will have to do.
 };
 
 using expression_ptr = std::unique_ptr<expression>;
@@ -57,10 +56,14 @@ struct indirector : public expression {
   }
   bool is_complete() const override { return inner->is_complete(); }
 
-  token_view getName() const noexcept override { return inner->getName(); };
+  token_view getName() const noexcept override { return inner->getName(); }
 };
-struct unevaluated_expression : public expression,
-                                public poly::list<expression> {
+// honestly might want to replace this with vector but
+// like everything in here is already a ptr so not much
+// of a point. I really need to replace this all with
+// a variant-vector type or something. Or just not
+// bother with a AST
+struct expression_tree : public expression, public poly::list<expression> {
   inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
@@ -77,7 +80,7 @@ struct unevaluated_expression : public expression,
     return "expression tree";
   }
 };
-struct namespace_tree : unevaluated_expression {
+struct namespace_tree : expression_tree {
   token name;
   inline std::ostream &print(std::ostream &out) const override {
     out << "namespace " << name << " contents:\n";
@@ -112,7 +115,7 @@ public:
   inline auto &get_token() { return std::get<0>(contents); }
   void confirm(expression_ptr &&ptr) { contents.emplace<1>(std::move(ptr)); }
 
-  virtual std::ostream &print(std::ostream &stream) const {
+  virtual std::ostream &print(std::ostream &stream) const override {
     if (contents.index() == 0) {
       stream << "unevaluated expression: \"" << std::get<0>(contents) << "\" ";
     } else {
@@ -120,18 +123,18 @@ public:
     }
     return stream;
   }
-  virtual bool is_complete() const {
+  virtual bool is_complete() const override {
     if (contents.index() == 0)
       return false;
     return std::get<1>(contents)->is_complete();
   };
-  virtual token_view getName() const noexcept {
+  virtual token_view getName() const noexcept override {
     if (contents.index() == 0) {
       return "unevaluated expression";
     } else {
       return std::get<1>(contents)->getName();
     }
-  };
+  }
 };
 
 // _q means qualifier
@@ -167,9 +170,9 @@ using type_list = vector<const var_decl *>;
 
 struct fun_def : public expression {
   token name;
-  expression_list arguments;
-  expression_ptr body;
-  var_decl const *return_type;
+  vector<std::unique_ptr<var_decl>> arguments;
+  expression_list body;
+  var_decl const *return_type = nullptr;
   bool member = false;
 
   fun_def(token_view name, bool member = false) : name(name), member(member) {}
@@ -181,7 +184,23 @@ struct fun_def : public expression {
                     std::move(args)...);
   }
   inline std::ostream &print(std::ostream &out) const override {
-    return out << "function: " << name;
+    out << "function: " << name;
+    if (return_type) {
+      out << " returns " << *return_type;
+    }
+    if (!arguments.empty()) {
+      out << "\nargs: ";
+      for (auto &arg : arguments) {
+        out << *arg << '\n';
+      }
+    }
+    if (!body.empty()) {
+      out << "body:\n";
+      for (auto &p : body) {
+        out << p;
+      }
+    }
+    return out;
   }
   string_view getName() const noexcept override { return name; }
   bool is_member() const noexcept { return member; }
@@ -214,6 +233,7 @@ public:
   inline std::ostream &print(std::ostream &out) const override {
     return out << "struct definition";
   }
+  inline token_view getName() const noexcept override { return "struct def"; }
 };
 decltype(auto) struct_def_ptr(auto &&...args) {
   return std::make_unique<struct_def>(std::forward(args)...);
@@ -227,6 +247,7 @@ public:
   inline std::ostream &print(std::ostream &out) const override {
     return out << "variable dereference: " << name;
   }
+  inline string_view getName() const noexcept override { return "var ref"; }
 };
 
 class fun_call : public expression {
@@ -254,16 +275,6 @@ public:
     return function.arguments.size() == args.size();
   }
   void add_arg(expression_ptr &&in) { args.push_back(std::move(in)); }
-};
-
-class assembly : public expression {
-  token asm_string;
-
-public:
-  assembly(token_view assembly) : asm_string(assembly) {}
-  inline std::ostream &print(std::ostream &out) const override {
-    return out << "inline assembly";
-  }
 };
 
 } // namespace selflang

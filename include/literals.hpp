@@ -2,6 +2,7 @@
 
 #include "container_types.hpp"
 #include "selfc.hpp"
+#include <initializer_list>
 
 namespace selflang {
 using token = string;
@@ -81,7 +82,8 @@ bool inline constexpr is_keyword(token_view t) {
   }
   return false;
 }
-constexpr inline auto grammar = {";", ",", " ", "(", ")", "{", "}", "\"", ":"};
+inline constexpr token_view endl = ";";
+constexpr inline std::initializer_list<token_view> grammar = {endl, ",", " ", "(", ")", "{", "}", "\"", ":"};
 bool inline is_grammar(token_view t) {
   for (auto g : grammar) {
     if (t == g)

@@ -4,7 +4,6 @@
 #include "literals.hpp"
 #include "syntax_tree.hpp"
 #include <algorithm>
-#include <boost/sml.hpp>
 #include <charconv>
 #include <cstddef>
 #include <function_pipes.hpp>
@@ -19,7 +18,6 @@
 
 namespace {
 
-template <typename T> using sm = boost::sml::sm<T>;
 using namespace selflang;
 void preprocess(string &contents) {
   RE2::Replace(&contents, R"(\/\/.*?\n)", " ");
@@ -34,7 +32,7 @@ auto token_parse(string &whole) {
   token_vec token_list;
   while (RE2::FindAndConsume(
       &input,
-      R"(([^<>\s(){};,\[\]":]+|\(|\)|{|}|\[|\]|(?:".+")|;|,|<|>|:))",
+      R"(((?:->)|\(|\)|{|}|\[|\]|(?:".+")|;|,|<|>|:|[^<>\s(){};,\[\]":]+))",
       &cur_token)) {
     token_list.push_back(cur_token);
   }
@@ -56,7 +54,7 @@ struct expression_v {
 
 } // namespace
 namespace selflang {
-expression_list lex(const string &in) {
+expression_tree lex(const string &in) {
   // who knows how many copy constructors this thing calls
   // need to optimize later TODOS
   return in | mtx::pipe([](auto &&f) {
