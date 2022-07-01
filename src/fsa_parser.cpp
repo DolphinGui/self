@@ -4,6 +4,7 @@
 #include "literals.hpp"
 #include "syntax_tree.hpp"
 
+#include <iterator>
 #include <sstream>
 
 namespace {
@@ -212,12 +213,13 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
     if (auto *a = dynamic_cast<selflang::fun_call *>(it->get());
         a && a->get_def().is_member()) {
       auto lhs = it, rhs = it;
-      --lhs, ++rhs;
+      ++lhs, --rhs;
       auto left = selflang::expression_ptr(lhs->release()),
            right = selflang::expression_ptr(rhs->release());
-      tree.erase(lhs.base()), tree.erase(rhs.base());
       a->add_arg(std::move(left));
       a->add_arg(std::move(right));
+      tree.erase(rhs.base());
+      it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
     }
   }
 
