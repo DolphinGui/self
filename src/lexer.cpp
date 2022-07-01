@@ -11,7 +11,6 @@
 #include <memory>
 #include <ranges>
 #include <re2/re2.h>
-#include <rva/variant.hpp>
 #include <stdexcept>
 #include <system_error>
 #include <utility>

@@ -23,7 +23,7 @@ constexpr auto reserved_guard = [](auto t) {
 
 struct global_parser {
   // syntax tree must be first because of initialization rules
-  selflang::expression_tree &syntax_tree;
+  selflang::expression_tree syntax_tree;
   static inline selflang::string err_string;
   // might want to make this a dictionary instead of a list. might scale better
   // for large type lists.
@@ -114,7 +114,7 @@ struct global_parser {
       break;
     case named:
       if (t == ":") {
-        var_state = type_annotated;
+        var_state = semicolon;
         break;
       } else if (reserved_guard(t)) {
         var_state = expr;
@@ -127,11 +127,18 @@ struct global_parser {
       break;
     case semicolon:
       if (reserved_guard(t)) {
+        for (auto a : types) {
+          if (a->getName() == t) {
+            reinterpret_cast<selflang::var_decl &>(*current).var_type = a;
+            break;
+          }
+        }
         var_state = type_annotated;
       }
       break;
     case type_annotated:
       if (t == endl) {
+        syntax_tree.emplace_back(std::move(current));
         var_state = init;
       }
       break;
@@ -163,8 +170,7 @@ struct global_parser {
     }
   }
 
-  global_parser(selflang::expression_tree &syntax_tree)
-      : syntax_tree(syntax_tree) {
+  global_parser() {
     types.push_back(&selflang::void_type);
     types.push_back(&selflang::byte_type);
     types.push_back(&selflang::type_var);
@@ -218,7 +224,11 @@ global_parser::evaluate_tree(selflang::expression_tree &uneval) {
 
 namespace selflang {
 expression_tree parse(token_vec &in) {
-  expression_tree syntax_tree;
-  return syntax_tree;
+  global_parser parser;
+  for (auto t : in) {
+    parser.process(t);
+  }
+  auto result = std::move(parser.syntax_tree);
+  return result;
 }
 } // namespace selflang

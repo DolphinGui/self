@@ -8,7 +8,7 @@
 constexpr std::string_view var_decl_test = "var a: byte\nvar b: void";
 constexpr std::string_view expr_test = "var a = 1 + (2 - 5 / 3) * 2";
 constexpr std::string_view fun_def_test =
-    "fun a(b: int)->int{var a = 5}";
+    "var a: int";
 int main() {
   uint count = 0;
   for (const auto &file : {fun_def_test}) {
@@ -16,7 +16,7 @@ int main() {
     std::string string(file);
     auto results = selflang::lex(string);
     for (auto &ex : results) {
-      std::cout << ex << '\n';
+      std::cout << *ex << '\n';
     }
   }
 }
