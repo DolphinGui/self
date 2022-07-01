@@ -3,8 +3,7 @@
 #include "lexer.hpp"
 #include "literals.hpp"
 #include "syntax_tree.hpp"
-#include <functional>
-#include <memory>
+
 #include <sstream>
 
 namespace {
@@ -42,27 +41,29 @@ struct global_parser {
   void parse_symbol(auto &base, selflang::expression_tree &tree) {
     if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base.get());
         maybe && !maybe->is_complete()) {
+      if (auto [is_int, number] = is_integer(maybe->get_token()); is_int) {
+        base = std::make_unique<selflang::int_literal>(number);
+        return;
+      }
       for (auto symbol : symbols) {
         if (symbol->getName() == maybe->get_token() &&
             typeid(*symbol) == typeid(selflang::operator_def)) {
           base = std::move(std::make_unique<selflang::fun_call>(
               reinterpret_cast<const selflang::operator_def &>(*symbol)));
-          break;
+          return;
         }
       }
-    } else if (auto [is_int, number] = is_integer(maybe->get_token()); is_int) {
-      base = std::make_unique<selflang::int_literal>(number);
     } else if (auto *uneval =
                    dynamic_cast<selflang::expression_tree *>(base.get());
                uneval) {
       base = evaluate_tree(*uneval);
+      return;
     }
   }
   void evaluate() {
     auto curr = std::move(current);
     auto &tree = dynamic_cast<selflang::expression_tree &>(*curr.get());
-    syntax_tree.back().reset(evaluate_tree(tree).release());
-    return;
+    current = evaluate_tree(tree);
   }
   enum struct fsa_states { init, var, fun, expr };
   enum struct var_states { init, named, semicolon, type_annotated, expr };
@@ -79,14 +80,19 @@ struct global_parser {
 
   bool expr_parse(selflang::token_view t, bool eat_curr = false) {
     using enum expr_states;
+    auto *a = dynamic_cast<selflang::expression_tree *>(current.get());
     switch (expr_state) {
     case init:
       if (eat_curr)
         eat_prev();
+      else
+        current = std::make_unique<selflang::expression_tree>();
       expr_state = processing;
-      break;
+      [[fallthrough]];
     case processing:
       if (t == selflang::reserved::endl) {
+        evaluate();
+        syntax_tree.emplace_back(std::move(current));
         expr_state = init;
         return true;
       } else {
@@ -141,7 +147,7 @@ struct global_parser {
         syntax_tree.emplace_back(std::move(current));
         var_state = init;
       }
-      break;
+      return true;
     }
     return false;
   }
@@ -184,8 +190,7 @@ struct global_parser {
   }
 };
 selflang::expression_ptr
-global_parser::evaluate_tree(selflang::expression_tree &uneval) {
-  auto &tree = dynamic_cast<selflang::expression_tree &>(uneval);
+global_parser::evaluate_tree(selflang::expression_tree &tree) {
   for (auto &ptr : tree) {
     parse_symbol(ptr, tree);
   }
@@ -197,7 +202,7 @@ global_parser::evaluate_tree(selflang::expression_tree &uneval) {
       --lhs, ++rhs;
       auto left = selflang::expression_ptr(lhs->release()),
            right = selflang::expression_ptr(rhs->release());
-      tree.erase(rhs), tree.erase(lhs);
+      tree.erase(rhs), it = tree.erase(lhs);
       a->add_arg(std::move(left));
       a->add_arg(std::move(right));
     }
@@ -215,6 +220,7 @@ global_parser::evaluate_tree(selflang::expression_tree &uneval) {
       a->add_arg(std::move(right));
     }
   }
+
   err_assert(tree.size() == 1, "tree is not fully resolved");
   auto last = selflang::expression_ptr(tree.front().release());
   tree.pop_back();

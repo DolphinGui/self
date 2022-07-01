@@ -1,6 +1,6 @@
 #pragma once
-#include <sstream>
 #include <memory>
+#include <sstream>
 
 #include "container_types.hpp"
 namespace selflang {
@@ -27,9 +27,6 @@ struct expression {
     return ex.print(os);
   }
   virtual token_view getName() const noexcept = 0;
-  // TODO: this can be made much less redundant by using the
-  // deducing this from c++23. I don't have that rn, so for now
-  // this will have to do.
 };
 
 using expression_ptr = std::unique_ptr<expression>;
@@ -41,7 +38,7 @@ struct expression_tree : public expression, public expression_list {
   inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
-      out << "  " << e << '\n';
+      out << "  " << *e << '\n';
     }
     return out;
   }
