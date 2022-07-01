@@ -24,7 +24,7 @@ add_link_options(-fsanitize=address)
 add_library(selflib ${PROJECT_SRC}/lexer.cpp ${PROJECT_SRC}/fsa_parser.cpp)
 target_include_directories(selflib PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selflib PROPERTY CXX_STANDARD 20)
-target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes polymorphic_list::polymorphic_list ${llvm_libs})
+target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes ${llvm_libs})
 
 add_executable(selfc ${PROJECT_SRC}/selfc.cpp)
 target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)

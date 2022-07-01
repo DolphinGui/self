@@ -1,18 +1,8 @@
 #pragma once
 #include <sstream>
-
-#include <polymorphic_list/list.hpp>
+#include <memory>
 
 #include "container_types.hpp"
-// I hate that I have to do this but it's the only way to keep my
-// sanity doing all this
-#define SELF_SUBCALL_MACRO(NAME, FUNCTION, TYPE)                               \
-  void NAME(TYPE a) override { FUNCTION }
-#define SUBCALL_PROTOTYPE(NAME, TYPE) virtual void NAME(TYPE) = 0;
-#define PUSH_BACK a.push_back(std::move(*this));
-#define SUB_METHODS                                                            \
-  SELF_SUBCALL_MACRO(move_into, PUSH_BACK, poly::list<expression> &)
-#define BASE_PROTOTYPES SUBCALL_PROTOTYPE(move_into, poly::list<expression> &)
 namespace selflang {
 namespace detail {
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }
@@ -44,26 +34,10 @@ struct expression {
 
 using expression_ptr = std::unique_ptr<expression>;
 using expression_list = vector<expression_ptr>;
-struct indirector : public expression {
-  expression_ptr inner;
-  indirector(expression *ptr) : inner(ptr) {}
-  indirector(expression_ptr &&ptr) : inner(std::move(ptr)) {}
-  ~indirector() = default;
-  indirector(indirector &&other) = default;
-  std::ostream &print(std::ostream &out) const override {
-    out << "indirector: ";
-    return inner->print(out);
-  }
-  bool is_complete() const override { return inner->is_complete(); }
 
-  token_view getName() const noexcept override { return inner->getName(); }
-};
-// honestly might want to replace this with vector but
-// like everything in here is already a ptr so not much
-// of a point. I really need to replace this all with
-// a variant-vector type or something. Or just not
-// bother with a AST
-struct expression_tree : public expression, public poly::list<expression> {
+// This is now a vector of pointers. This is horrible, but figuring
+// a better structure out is difficult.
+struct expression_tree : public expression, public expression_list {
   inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {

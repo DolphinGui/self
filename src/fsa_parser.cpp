@@ -39,32 +39,29 @@ struct global_parser {
     }
   }
   selflang::expression_ptr evaluate_tree(selflang::expression_tree &uneval);
-  void parse_symbol(auto *base, auto &it, auto &tree) {
-    if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base);
+  void parse_symbol(auto &base, selflang::expression_tree &tree) {
+    if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base.get());
         maybe && !maybe->is_complete()) {
       for (auto symbol : symbols) {
-        if (symbol->getName() == maybe->get_token()) {
-          if (typeid(*symbol) == typeid(selflang::operator_def)) {
-            tree.template replace_emplace<selflang::fun_call>(
-                it, dynamic_cast<const selflang::operator_def &>(*symbol));
-          }
-          break;
-        } else if (auto [is_int, number] = is_integer(maybe->get_token());
-                   is_int) {
-          tree.template replace_emplace<selflang::int_literal>(it, number);
+        if (symbol->getName() == maybe->get_token() &&
+            typeid(*symbol) == typeid(selflang::operator_def)) {
+          base = std::move(std::make_unique<selflang::fun_call>(
+              reinterpret_cast<const selflang::operator_def &>(*symbol)));
           break;
         }
       }
-    } else if (auto *uneval = dynamic_cast<selflang::expression_tree *>(base);
+    } else if (auto [is_int, number] = is_integer(maybe->get_token()); is_int) {
+      base = std::make_unique<selflang::int_literal>(number);
+    } else if (auto *uneval =
+                   dynamic_cast<selflang::expression_tree *>(base.get());
                uneval) {
-      tree.template replace_emplace<selflang::indirector>(
-          it, evaluate_tree(*uneval));
+      base = evaluate_tree(*uneval);
     }
   }
   void evaluate() {
-    auto t = syntax_tree.rbegin();
-    auto &tree = dynamic_cast<selflang::expression_tree &>(*t);
-    syntax_tree.replace(t, std::move(*evaluate_tree(tree)));
+    auto curr = std::move(current);
+    auto &tree = dynamic_cast<selflang::expression_tree &>(*curr.get());
+    syntax_tree.back().reset(evaluate_tree(tree).release());
     return;
   }
   enum struct fsa_states { init, var, fun, expr };
@@ -76,7 +73,7 @@ struct global_parser {
   void eat_prev() {
     auto prev = std::move(current);
     auto curr = std::make_unique<selflang::expression_tree>();
-    curr->push_back(std::move(dynamic_cast<selflang::var_decl &>(*prev)));
+    curr->push_back(std::move(prev));
     current = std::move(curr);
   }
 
@@ -94,7 +91,7 @@ struct global_parser {
         return true;
       } else {
         dynamic_cast<selflang::expression_tree &>(*current).push_back(
-            selflang::maybe_expression(t));
+            std::make_unique<selflang::maybe_expression>(t));
       }
       break;
     }
@@ -183,43 +180,39 @@ struct global_parser {
 selflang::expression_ptr
 global_parser::evaluate_tree(selflang::expression_tree &uneval) {
   auto &tree = dynamic_cast<selflang::expression_tree &>(uneval);
-  for (auto it = tree.begin(); it != tree.end(); ++it) {
-    parse_symbol(&(*it), it, tree);
+  for (auto &ptr : tree) {
+    parse_symbol(ptr, tree);
   }
-  const auto remove_indirection = [](selflang::expression_ptr &ptr) {
-    if (auto *indirector = dynamic_cast<selflang::indirector *>(ptr.get());
-        indirector) {
-      ptr.reset(indirector->inner.release());
-    }
-  };
 
   for (auto it = tree.begin(); it != tree.end(); ++it) {
-    if (auto *a = dynamic_cast<selflang::fun_call *>(&(*it));
+    if (auto *a = dynamic_cast<selflang::fun_call *>(it->get());
         a && !a->get_def().is_member()) {
       auto lhs = it, rhs = it;
       --lhs, ++rhs;
-      auto left = tree.pop(lhs), right = tree.pop(rhs);
-      remove_indirection(left);
-      remove_indirection(right);
+      auto left = selflang::expression_ptr(lhs->release()),
+           right = selflang::expression_ptr(rhs->release());
+      tree.erase(rhs), tree.erase(lhs);
       a->add_arg(std::move(left));
       a->add_arg(std::move(right));
     }
   }
 
   for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
-    if (auto *a = dynamic_cast<selflang::fun_call *>(&(*it));
+    if (auto *a = dynamic_cast<selflang::fun_call *>(it->get());
         a && a->get_def().is_member()) {
       auto lhs = it, rhs = it;
       --lhs, ++rhs;
-      auto left = tree.pop(lhs), right = tree.pop(rhs);
-      remove_indirection(left);
-      remove_indirection(right);
-      a->add_arg(std::move(right));
+      auto left = selflang::expression_ptr(lhs->release()),
+           right = selflang::expression_ptr(rhs->release());
+      tree.erase(lhs.base()), tree.erase(rhs.base());
       a->add_arg(std::move(left));
+      a->add_arg(std::move(right));
     }
   }
   err_assert(tree.size() == 1, "tree is not fully resolved");
-  return tree.pop_front();
+  auto last = selflang::expression_ptr(tree.front().release());
+  tree.pop_back();
+  return last;
 }
 } // namespace
 
