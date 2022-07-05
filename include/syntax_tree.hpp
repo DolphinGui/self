@@ -108,21 +108,15 @@ public:
   }
 };
 
-// _q means qualifier
-enum struct qual { const_q, ref_q, compiletime_q, runtime_q };
-
 class var_decl : public expression {
   token name;
-  vector<qual> qualifiers;
 
 public:
   const var_decl *var_type = nullptr;
   var_decl(token_view name) : name(name) {}
   var_decl(token_view name, const var_decl &type)
       : name(name), var_type(&type) {}
-  var_decl(token_view name, std::initializer_list<qual> qualifiers)
-      : name(name), qualifiers(qualifiers) {}
-  inline void add_qualifier(token qualifier) {}
+
   token_view getName() const noexcept override { return name; }
   inline std::ostream &print(std::ostream &out) const override {
     if (var_type)
@@ -142,7 +136,7 @@ using type_list = vector<const var_decl *>;
 struct fun_def : public expression {
   token name;
   vector<std::unique_ptr<var_decl>> arguments;
-  expression_list body;
+  expression_tree body;
   var_decl const *return_type = nullptr;
   bool member = false;
 
@@ -159,6 +153,7 @@ struct fun_def : public expression {
     if (return_type) {
       out << " returns " << *return_type;
     }
+
     if (!arguments.empty()) {
       out << "\nargs: ";
       for (auto &arg : arguments) {
@@ -166,9 +161,9 @@ struct fun_def : public expression {
       }
     }
     if (!body.empty()) {
-      out << "body:\n";
+      out << "\nbody:\n";
       for (auto &p : body) {
-        out << p;
+        out << *p.get();
       }
     }
     return out;

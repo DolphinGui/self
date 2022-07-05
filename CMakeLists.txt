@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(selfc CXX)
+project(selfc CXX C)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(PROJECT_SRC ${CMAKE_SOURCE_DIR}/src)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
@@ -25,6 +25,12 @@ add_library(selflib ${PROJECT_SRC}/lexer.cpp ${PROJECT_SRC}/fsa_parser.cpp)
 target_include_directories(selflib PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selflib PROPERTY CXX_STANDARD 20)
 target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes ${llvm_libs})
+
+if(MSVC)
+  target_compile_options(selflib PRIVATE /W4 /WX)
+else()
+  target_compile_options(selflib PRIVATE -Wall -Wextra)
+endif()
 
 add_executable(selfc ${PROJECT_SRC}/selfc.cpp)
 target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)
