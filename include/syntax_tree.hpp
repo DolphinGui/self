@@ -242,5 +242,14 @@ public:
   }
   void add_arg(expression_ptr &&in) { args.push_back(std::move(in)); }
 };
+struct ret : public expression {
+  expression_ptr value;
 
+  virtual token_view getName() const noexcept override { return "return"; }
+  inline std::ostream &print(std::ostream &out) const override {
+    out << "returns " << *value;
+    return out;
+  }
+  bool is_complete() const noexcept override { return !value; }
+};
 } // namespace selflang

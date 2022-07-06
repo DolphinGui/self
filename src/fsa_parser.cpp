@@ -4,6 +4,7 @@
 #include "literals.hpp"
 #include "syntax_tree.hpp"
 
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <sstream>
@@ -68,7 +69,8 @@ struct global_parser {
     auto &tree = dynamic_cast<selflang::expression_tree &>(*curr.get());
     current.push_back(evaluate_tree(tree));
   }
-  enum struct fsa_states { start, init, var, fun, expr };
+  enum struct decl_states { start, init, var, fun, expr };
+  enum struct exec_states { start, init, var, expr, ret };
   enum struct var_states { init, named, semicolon, type_annotated, expr };
   enum struct expr_states { init, processing };
   enum struct fun_states {
@@ -83,11 +85,13 @@ struct global_parser {
     declared,
     parsing
   };
-  fsa_states fsa_state = fsa_states::init;
+  decl_states fsa_state = decl_states::init;
   var_states var_state = var_states::init;
   expr_states expr_state = expr_states::init;
   fun_states fun_state = fun_states::init;
-  fsa_states fun_inner_state = fsa_states::start;
+  exec_states fun_inner_state = exec_states::start;
+  using callback = std::function<void()>;
+
   void eat_prev() {
     auto prev = std::move(current.back());
     current.pop_back();
@@ -96,12 +100,13 @@ struct global_parser {
     current.push_back(std::move(curr));
   }
 
-  bool expr_parse(selflang::token_view t, bool eat_curr = false) {
+  bool expr_parse(selflang::token_view t, callback start = nullptr,
+                  callback insert_call = nullptr) {
     using enum expr_states;
     switch (expr_state) {
     case init:
-      if (eat_curr)
-        eat_prev();
+      if (start)
+        start();
       else {
         current.push_back(std::make_unique<selflang::expression_tree>());
       }
@@ -110,14 +115,18 @@ struct global_parser {
     case processing:
       if (t == selflang::reserved::endl) {
         evaluate();
-        context_stack.back()->emplace_back(std::move(current.back()));
-        current.pop_back();
+        if (!insert_call) {
+          context_stack.back()->emplace_back(std::move(current.back()));
+          current.pop_back();
+        } else {
+          insert_call();
+        }
         expr_state = init;
         return true;
       } else {
-        auto *curr_expr =
-            dynamic_cast<selflang::expression_tree *>(current.back().get());
-        curr_expr->push_back(std::make_unique<selflang::maybe_expression>(t));
+        auto &curr_expr =
+            dynamic_cast<selflang::expression_tree &>(*current.back());
+        curr_expr.push_back(std::make_unique<selflang::maybe_expression>(t));
       }
       break;
     }
@@ -147,7 +156,7 @@ struct global_parser {
         [[fallthrough]];
       }
     case expr:
-      if (expr_parse(t, true)) {
+      if (expr_parse(t, [this] { eat_prev(); })) {
         var_state = init;
         return true;
       }
@@ -264,7 +273,7 @@ struct global_parser {
         err_assert(false, "\"{\" expected.");
       break;
     case parsing: {
-      using enum fsa_states;
+      using enum exec_states;
       using namespace selflang::reserved;
       switch (fun_inner_state) {
       case start:
@@ -274,8 +283,9 @@ struct global_parser {
         if (t == var_t) {
           fun_inner_state = var;
           break;
-        } else if (t == fun_t) {
-          fun_inner_state = fun;
+        } else if (t == return_t) {
+          current.push_back(std::make_unique<selflang::ret>());
+          fun_inner_state = ret;
           break;
         } else if (reserved_guard(t)) {
           fun_inner_state = expr;
@@ -299,8 +309,23 @@ struct global_parser {
         if (var_parse(t))
           fun_inner_state = init;
         break;
-      case fun:
-        err_assert(false, "Cannot declare a function in a function. For now.");
+      case ret:
+        const auto insert = [this] {
+          auto expr = std::move(current.back());
+          current.pop_back();
+          dynamic_cast<selflang::ret &>(*current.back()).value =
+              std::move(expr);
+          context_stack.back()->push_back(std::move(current.back()));
+          current.pop_back();
+        };
+        if (t == endl && expr_state == expr_states::init) {
+          context_stack.back()->push_back(std::move(current.back()));
+          current.pop_back();
+        } else {
+          if (expr_parse(t, nullptr, insert)) {
+            fun_inner_state = init;
+          }
+        }
         break;
       }
     } break;
@@ -309,7 +334,7 @@ struct global_parser {
   }
 
   void process(selflang::token_view t) {
-    using enum fsa_states;
+    using enum decl_states;
     using namespace selflang::reserved;
     switch (fsa_state) {
     case start:

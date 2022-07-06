@@ -7,6 +7,7 @@ const inline auto void_type = var_decl("void");
 const inline auto byte_type = var_decl("byte");
 const inline auto type_var = var_decl("type");
 const inline auto int_type = var_decl("int");
+// const inline auto bool_type = var_decl("bool");
 // might remove these later
 const inline auto int_token_t = var_decl("int_token", type_var);
 const inline auto int_token_assignment =
