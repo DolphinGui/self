@@ -81,6 +81,7 @@ struct global_parser {
     arg_colon,
     arg_finished,
     args_specified,
+    forwarded,
     arrow,
     declared,
     parsing
@@ -165,7 +166,7 @@ struct global_parser {
       if (reserved_guard(t)) {
         for (auto a : types) {
           if (a->getName() == t) {
-            reinterpret_cast<selflang::var_decl &>(*current.back()).var_type =
+            reinterpret_cast<selflang::var_decl &>(*current.back()).type.ptr =
                 a;
             break;
           }
@@ -224,7 +225,7 @@ struct global_parser {
     case arg_colon:
       for (auto &type : types) {
         if (type->getName() == t) {
-          fun_ptr->arguments.back()->var_type = type;
+          fun_ptr->arguments.back()->type.ptr = type;
           goto type_found;
         }
       }
@@ -259,7 +260,14 @@ struct global_parser {
       }
       err_assert(false, "no types found");
     return_type_found:
-      fun_state = arg_finished;
+      fun_state = args_specified;
+      break;
+    case forwarded:
+      if (t == "{") {
+        fun_state = parsing;
+      } else {
+        err_assert(false, "\"{\" or \"->\" expected.");
+      }
       break;
     case declared:
       if (t == "{")
@@ -372,7 +380,6 @@ struct global_parser {
     types.push_back(&selflang::byte_type);
     types.push_back(&selflang::type_var);
     types.push_back(&selflang::int_type);
-    types.push_back(&selflang::int_token_t);
     symbols.push_back(&selflang::int_token_assignment);
     symbols.push_back(&selflang::internal_addi);
     symbols.push_back(&selflang::internal_subi);

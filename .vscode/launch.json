@@ -11,6 +11,13 @@
       "target": "./lex_test",
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "prettyPrinters"
+    },{
+      "name": "integration_test",
+      "type": "gdb",
+      "request": "launch",
+      "target": "./integration_test",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "prettyPrinters"
     }
   ]
 }

@@ -7,7 +7,7 @@
 
 constexpr std::string_view var_decl_test = "var a: byte\nvar b: void";
 constexpr std::string_view expr_test = "var a = 1 + (2 - 5 / 3) * 2";
-constexpr std::string_view fun_def_test = "fun a(){return 5 / 2 + 5;}";
+constexpr std::string_view fun_def_test = "fun main()->int{return 0;}";
 int main() {
   uint count = 0;
   for (const auto &file : {fun_def_test}) {
@@ -16,6 +16,11 @@ int main() {
     auto results = selflang::lex(string);
     for (auto &ex : results) {
       std::cout << *ex << '\n';
+    }
+    if (results.is_complete()) {
+      std::cout << "type is complete\n";
+    } else {
+      std::cout << "type is not complete\n";
     }
   }
 }

@@ -2,29 +2,42 @@
 #include "syntax_tree.hpp"
 #include <cstddef>
 namespace selflang {
-
-const inline auto void_type = var_decl("void");
-const inline auto byte_type = var_decl("byte");
-const inline auto type_var = var_decl("type");
-const inline auto int_type = var_decl("int");
+namespace detail {
+constexpr auto ctr_lambda = [](auto in, int hash) {
+  in.hash = hash;
+  return in;
+};
+enum hash_value { none = 0, store, addi, subi, muli, divi };
+} // namespace detail
+const inline auto type_type = var_decl("type");
+const inline auto void_type = var_decl("void", type_type);
+const inline auto byte_type = var_decl("byte", type_type);
+const inline auto type_var = var_decl("type", type_type);
+const inline auto int_type = var_decl("int", type_type);
 // const inline auto bool_type = var_decl("bool");
 // might remove these later
-const inline auto int_token_t = var_decl("int_token", type_var);
-const inline auto int_token_assignment =
-    operator_def("=", int_type, var_decl_ptr("this", int_token_t),
-                 var_decl_ptr("RHS", int_token_t), true);
-const inline auto internal_addi =
-    operator_def("+", int_type, var_decl_ptr("LHS", int_token_t),
-                 var_decl_ptr("RHS", int_token_t));
-const inline auto internal_subi =
-    operator_def("-", int_type, var_decl_ptr("LHS", int_token_t),
-                 var_decl_ptr("RHS", int_token_t));
-const inline auto internal_muli =
-    operator_def("*", int_type, var_decl_ptr("LHS", int_token_t),
-                 var_decl_ptr("RHS", int_token_t));
-const inline auto internal_divi =
-    operator_def("/", int_type, var_decl_ptr("LHS", int_token_t),
-                 var_decl_ptr("RHS", int_token_t));
+const inline auto int_token_assignment = detail::ctr_lambda(
+    operator_def(
+        "=", int_type,
+        var_decl_ptr("this", type_ref{.ptr = int_type, .is_ptr = true}),
+        var_decl_ptr("RHS", int_type), true),
+    detail::store);
+const inline auto internal_addi = detail::ctr_lambda(
+    operator_def("+", int_type, var_decl_ptr("LHS", int_type),
+                 var_decl_ptr("RHS", int_type)),
+    detail::addi);
+const inline auto internal_subi = detail::ctr_lambda(
+    operator_def("-", int_type, var_decl_ptr("LHS", int_type),
+                 var_decl_ptr("RHS", int_type)),
+    detail::subi);
+const inline auto internal_muli = detail::ctr_lambda(
+    operator_def("*", int_type, var_decl_ptr("LHS", int_type),
+                 var_decl_ptr("RHS", int_type)),
+    detail::muli);
+const inline auto internal_divi = detail::ctr_lambda(
+    operator_def("/", int_type, var_decl_ptr("LHS", int_type),
+                 var_decl_ptr("RHS", int_type)),
+    detail::divi);
 using int_literal = literal<size_t>;
 using double_literal = literal<double>;
 

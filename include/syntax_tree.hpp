@@ -1,6 +1,12 @@
 #pragma once
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Type.h>
 #include <memory>
 #include <sstream>
+
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
 
 #include "container_types.hpp"
 namespace selflang {
@@ -50,6 +56,14 @@ struct expression_tree : public expression, public expression_list {
   virtual token_view getName() const noexcept override {
     return "expression tree";
   }
+  bool is_complete() const noexcept override {
+    for (auto &expr : *this) {
+      if (!expr->is_complete())
+        return false;
+    }
+    return true;
+  }
+  llvm::Module &codegen() const;
 };
 struct namespace_tree : expression_tree {
   token name;
@@ -62,10 +76,8 @@ struct namespace_tree : expression_tree {
   }
 };
 
-template <typename T> class literal : public expression {
+template <typename T> struct literal : public expression {
   T value;
-
-public:
   literal(T itself) : value(itself){};
   inline std::ostream &print(std::ostream &out) const override {
     return out << "literal: " << value;
@@ -94,11 +106,7 @@ public:
     }
     return stream;
   }
-  virtual bool is_complete() const override {
-    if (contents.index() == 0)
-      return false;
-    return std::get<1>(contents)->is_complete();
-  };
+  virtual bool is_complete() const override { return false; }
   virtual token_view getName() const noexcept override {
     if (contents.index() == 0) {
       return "unevaluated expression";
@@ -107,20 +115,31 @@ public:
     }
   }
 };
+class var_decl;
+template <typename T> class type_indirect {
+public:
+  T ptr;
+  // These are qualifiers.
+  bool is_ptr = false;
+};
+using type_ptr = type_indirect<const var_decl *>;
+using type_ref = type_indirect<const var_decl &>;
 
 class var_decl : public expression {
   token name;
 
 public:
-  const var_decl *var_type = nullptr;
-  var_decl(token_view name) : name(name) {}
-  var_decl(token_view name, const var_decl &type)
-      : name(name), var_type(&type) {}
+  type_ptr type;
+  var_decl(token_view name) : name(name), type{nullptr} {}
+  var_decl(token_view name, type_ref type) : name(name), type{&type.ptr} {}
+  var_decl(token_view name, const var_decl &type) : name(name), type{&type} {}
+
+  llvm::Type *getType() const;
 
   token_view getName() const noexcept override { return name; }
   inline std::ostream &print(std::ostream &out) const override {
-    if (var_type)
-      return out << "variable declaration: " << var_type->getName() << ", "
+    if (type.ptr)
+      return out << "variable declaration: " << type.ptr->getName() << ", "
                  << name;
     else
       return out << "variable declaration: indeterminate type,  " << name;
@@ -128,7 +147,7 @@ public:
 };
 
 // name, type/value
-decltype(auto) var_decl_ptr(auto &&...args) {
+std::unique_ptr<var_decl> var_decl_ptr(auto &&...args) {
   return std::make_unique<var_decl>(std::forward<decltype(args)>(args)...);
 }
 using type_list = vector<const var_decl *>;
@@ -138,6 +157,7 @@ struct fun_def : public expression {
   vector<std::unique_ptr<var_decl>> arguments;
   expression_tree body;
   var_decl const *return_type = nullptr;
+  int hash = 0;
   bool member = false;
 
   fun_def(token_view name, bool member = false) : name(name), member(member) {}
@@ -170,6 +190,7 @@ struct fun_def : public expression {
   }
   string_view getName() const noexcept override { return name; }
   bool is_member() const noexcept { return member; }
+  bool is_complete() const noexcept override { return return_type; }
 };
 decltype(auto) funct_decl_ptr(auto &&...args) {
   return std::make_unique<fun_def>(std::forward<decltype(args)>(args)...);
@@ -218,9 +239,10 @@ public:
 
 class fun_call : public expression {
   const fun_def &function;
-  expression_list args;
 
 public:
+  expression_list args;
+
   fun_call(const fun_def &Callee) : function(Callee) {}
   fun_call(const fun_def &callee, expression_list &&Args)
       : function(callee), args(std::move(Args)) {}
