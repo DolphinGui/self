@@ -83,7 +83,8 @@ bool inline constexpr is_keyword(token_view t) {
   return false;
 }
 inline constexpr token_view endl = ";";
-constexpr inline std::initializer_list<token_view> grammar = {endl, ",", " ", "(", ")", "{", "}", "\"", ":"};
+constexpr inline std::initializer_list<const char *> grammar = {
+    ";", ",", " ", "(", ")", "{", "}", "\"", ":"};
 bool inline is_grammar(token_view t) {
   for (auto g : grammar) {
     if (t == g)

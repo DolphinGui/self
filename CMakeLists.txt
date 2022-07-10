@@ -16,15 +16,23 @@ include_directories(${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 
-llvm_map_components_to_libnames(llvm_libs support core)
+# this should be done by llvm_map_components, but it doesn't work
+# for some reason. I'll have to investigate that later.
+execute_process(
+  COMMAND llvm-config --ignore-libllvm --libs all-targets 
+  OUTPUT_VARIABLE TARGET_INFO
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+llvm_map_components_to_libnames(llvm_libs support core target)
 
 add_compile_options(-fsanitize=address)
 add_link_options(-fsanitize=address)
 
-add_library(selflib ${PROJECT_SRC}/lexer.cpp ${PROJECT_SRC}/fsa_parser.cpp ${PROJECT_SRC}/codegen.cpp)
+add_library(selflib ${PROJECT_SRC}/lexer.cpp ${PROJECT_SRC}/fsa_parser.cpp ${PROJECT_SRC}/codegen.cpp ${PROJECT_SRC}/backend_config.cpp)
 target_include_directories(selflib PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selflib PROPERTY CXX_STANDARD 20)
-target_link_libraries(selflib PUBLIC argh::argh re2::re2 function_pipes::function_pipes ${llvm_libs})
+target_link_libraries(selflib 
+PUBLIC argh::argh re2::re2 function_pipes::function_pipes 
+${llvm_libs} ${TARGET_INFO})
 
 if(MSVC)
   target_compile_options(selflib PRIVATE /W4 /WX)

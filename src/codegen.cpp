@@ -69,7 +69,7 @@ llvm::Value *dispatch(selflang::expression *expr, llvm::IRBuilder<> &builder) {
         llvm::APInt(32, dynamic_cast<selflang::int_literal &>(*expr).value));
   } else if (type == typeid(selflang::var_decl)) {
     auto &var = dynamic_cast<selflang::var_decl &>(*expr);
-    builder.CreateAlloca(var.getType(), 0, var.getName());
+    return builder.CreateAlloca(var.getType(), 0, var.getName());
   } else {
     std::cerr << type.name() << '\n';
     throw std::runtime_error("I dont know what type this is\n");
@@ -100,7 +100,12 @@ void fun_gen(selflang::fun_def *fun) {
 namespace selflang {
 llvm::Module &expression_tree::codegen() const {
   for (auto &expr : *this) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpotentially-evaluated-expression"
+
     if (auto &type = typeid(*expr); type == typeid(selflang::fun_def)) {
+
+#pragma GCC diagnostic pop
       fun_gen(dynamic_cast<selflang::fun_def *>(expr.get()));
     } else {
       throw std::runtime_error("unimplemented");
