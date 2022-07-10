@@ -22,7 +22,7 @@ execute_process(
   COMMAND llvm-config --ignore-libllvm --libs all-targets 
   OUTPUT_VARIABLE TARGET_INFO
   OUTPUT_STRIP_TRAILING_WHITESPACE)
-llvm_map_components_to_libnames(llvm_libs support core target)
+llvm_map_components_to_libnames(llvm_libs support core target codegen)
 
 add_compile_options(-fsanitize=address)
 add_link_options(-fsanitize=address)
