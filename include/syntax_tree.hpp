@@ -63,7 +63,6 @@ struct expression_tree : public expression, public expression_list {
     }
     return true;
   }
-  llvm::Module &codegen() const;
 };
 struct namespace_tree : expression_tree {
   token name;
@@ -134,8 +133,6 @@ public:
   var_decl(token_view name, type_ref type) : name(name), type{&type.ptr} {}
   var_decl(token_view name, const var_decl &type) : name(name), type{&type} {}
 
-  llvm::Type *getType() const;
-
   token_view getName() const noexcept override { return name; }
   inline std::ostream &print(std::ostream &out) const override {
     if (type.ptr)
@@ -159,6 +156,7 @@ struct fun_def : public expression {
   var_decl const *return_type = nullptr;
   int hash = 0;
   bool member = false;
+  bool body_defined = false;
 
   fun_def(token_view name, bool member = false) : name(name), member(member) {}
   fun_def(token_view name, const var_decl &return_type, bool member = false,
@@ -237,14 +235,14 @@ public:
   inline string_view getName() const noexcept override { return "var ref"; }
 };
 
-class fun_call : public expression {
+class fun_call_base : public expression {
   const fun_def &function;
 
 public:
   expression_list args;
 
-  fun_call(const fun_def &Callee) : function(Callee) {}
-  fun_call(const fun_def &callee, expression_list &&Args)
+  fun_call_base(const fun_def &Callee) : function(Callee) {}
+  fun_call_base(const fun_def &callee, expression_list &&Args)
       : function(callee), args(std::move(Args)) {}
   inline std::ostream &print(std::ostream &out) const override {
     out << "function call: " << function << " args: (";
@@ -254,15 +252,29 @@ public:
     out << ')';
     return out;
   }
-  virtual token_view getName() const noexcept override {
-    return "function call";
-  }
   const fun_def &get_def() const noexcept { return function; }
   // TODO: make this check types later.
   bool is_complete() const noexcept override {
     return function.arguments.size() == args.size();
   }
   void add_arg(expression_ptr &&in) { args.push_back(std::move(in)); }
+};
+
+class op_call : public fun_call_base {
+public:
+  op_call(const fun_def &Callee) : fun_call_base(Callee) {}
+  op_call(const fun_def &callee, expression_list &&Args)
+      : fun_call_base(callee, std::forward<expression_list>(Args)) {}
+
+  virtual token_view getName() const noexcept override { return "op call"; }
+};
+class fun_call : public fun_call_base {
+public:
+  fun_call(const fun_def &Callee) : fun_call_base(Callee) {}
+  fun_call(const fun_def &callee, expression_list &&Args)
+      : fun_call_base(callee, std::forward<expression_list>(Args)) {}
+
+  virtual token_view getName() const noexcept override { return "fun call"; }
 };
 struct ret : public expression {
   expression_ptr value;

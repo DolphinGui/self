@@ -10,12 +10,13 @@
 #include <string_view>
 
 constexpr auto file = "\
-\
-fun main()->int{return 1;}";
+fun selfputchar(c: char)->int\n \
+fun main()->int{selfputchar('h');return 0;}";
 constexpr auto path = "a.o";
 constexpr auto output_name = "a.out";
-// this is not crossplatform in the slightest. I will have to figure out how to
-// query OS details about this later. but for now, this'll work.
+// this is not crossplatform in the slightest.
+// I will have to figure out how to
+// query OS details about this later. but for now, this'll do
 constexpr auto link_command =
     R"(ld -pie --eh-frame-hdr -m elf_x86_64 -dynamic-linker \
  /lib64/ld-linux-x86-64.so.2 /usr/lib64/Scrt1.o /usr/lib64/crti.o \
@@ -25,7 +26,7 @@ constexpr auto link_command =
 int main() {
   auto AST = selflang::lex(file);
   std::cout << AST << '\n';
-  auto &IR = AST.codegen();
+  auto &IR = selflang::codegen(AST);
   IR.print(llvm::outs(), nullptr);
   std::error_code file_err;
   auto aout = llvm::raw_fd_ostream(path, file_err);
@@ -35,5 +36,5 @@ int main() {
   }
   selflang::compile(IR, aout);
   auto command = fmt::format(link_command, path, output_name);
-  std::system(command.c_str());
+  // std::system(command.c_str());
 }

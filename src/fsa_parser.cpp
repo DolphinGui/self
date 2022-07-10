@@ -17,6 +17,14 @@ auto is_integer(selflang::token_view t) {
   return std::pair{*p == 0, number};
 }
 
+auto is_char(selflang::token_view t) {
+  if (t.at(0) != '\'')
+    return std::pair{false, (unsigned char)'\0'};
+  if (t.length() != 3)
+    return std::pair{false, (unsigned char)'\0'};
+  return std::pair{true, (unsigned char)t.at(1)};
+}
+
 constexpr auto reserved_guard = [](auto t) {
   return !selflang::reserved::is_keyword(t) &&
          !selflang::reserved::is_grammar(t);
@@ -44,16 +52,25 @@ struct global_parser {
   void parse_symbol(auto &base) {
     if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base.get());
         maybe && !maybe->is_complete()) {
-      if (auto [is_int, number] = is_integer(maybe->get_token()); is_int) {
+      auto t = maybe->get_token();
+      if (auto [is_int, number] = is_integer(t); is_int) {
         base = std::make_unique<selflang::int_literal>(number);
+        return;
+      } else if (auto [result, c] = is_char(t); result) {
+        base = std::make_unique<selflang::char_literal>(c);
         return;
       }
       for (auto symbol : symbols) {
-        if (symbol->getName() == maybe->get_token() &&
-            typeid(*symbol) == typeid(selflang::operator_def)) {
-          base = std::move(std::make_unique<selflang::fun_call>(
-              reinterpret_cast<const selflang::operator_def &>(*symbol)));
-          return;
+        if (symbol->getName() == maybe->get_token()) {
+          if (typeid(*symbol) == typeid(selflang::operator_def)) {
+            base = std::make_unique<selflang::op_call>(
+                reinterpret_cast<const selflang::operator_def &>(*symbol));
+            return;
+          } else if (typeid(*symbol) == typeid(selflang::fun_def)) {
+            base = std::make_unique<selflang::fun_call>(
+                reinterpret_cast<const selflang::fun_def &>(*symbol));
+          }
+          err_assert(false, "conflicting symbols");
         }
       }
     } else if (auto *uneval =
@@ -260,11 +277,18 @@ struct global_parser {
       }
       err_assert(false, "no types found");
     return_type_found:
-      fun_state = args_specified;
+      fun_state = forwarded;
       break;
     case forwarded:
+      fun_ptr->body_defined = false;
       if (t == "{") {
         fun_state = parsing;
+      } else if (t == ";") {
+        symbols.push_back(current.back().get());
+        context_stack.back()->push_back(std::move(current.back()));
+        current.pop_back();
+        fun_state = init;
+        return true;
       } else {
         err_assert(false, "\"{\" or \"->\" expected.");
       }
@@ -300,8 +324,10 @@ struct global_parser {
           [[fallthrough]];
         } else if (t == "}") {
           context_stack.pop_back();
+          symbols.push_back(current.back().get());
           context_stack.back()->emplace_back(std::move(current.back()));
           current.pop_back();
+          fun_ptr->body_defined = true;
           fun_state = fun_states::init;
           fun_inner_state = start;
           return true;
@@ -380,6 +406,7 @@ struct global_parser {
     types.push_back(&selflang::byte_type);
     types.push_back(&selflang::type_var);
     types.push_back(&selflang::int_type);
+    types.push_back(&selflang::char_type);
     symbols.push_back(&selflang::int_token_assignment);
     symbols.push_back(&selflang::internal_addi);
     symbols.push_back(&selflang::internal_subi);
@@ -395,7 +422,12 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
   }
 
   for (auto it = tree.begin(); it != tree.end(); ++it) {
-    if (auto *a = dynamic_cast<selflang::fun_call *>(it->get());
+    // if(typeid(*it) == typeid(selflang::fun))
+  }
+
+  // left-right associative pass
+  for (auto it = tree.begin(); it != tree.end(); ++it) {
+    if (auto *a = dynamic_cast<selflang::op_call *>(it->get());
         a && !a->get_def().is_member()) {
       auto lhs = it, rhs = it;
       --lhs, ++rhs;
@@ -406,9 +438,9 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
       a->add_arg(std::move(right));
     }
   }
-
+  // right-left associative pass
   for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
-    if (auto *a = dynamic_cast<selflang::fun_call *>(it->get());
+    if (auto *a = dynamic_cast<selflang::op_call *>(it->get());
         a && a->get_def().is_member()) {
       auto lhs = it, rhs = it;
       ++lhs, --rhs;
@@ -431,8 +463,12 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
 namespace selflang {
 expression_tree parse(token_vec &in) {
   global_parser parser;
+  std::string debug;
   for (auto t : in) {
     parser.process(t);
+    std::stringstream s;
+    s << parser.syntax_tree << '\n';
+    debug = s.str();
   }
   auto result = std::move(parser.syntax_tree);
   return result;

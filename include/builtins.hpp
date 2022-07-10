@@ -14,6 +14,7 @@ const inline auto void_type = var_decl("void", type_type);
 const inline auto byte_type = var_decl("byte", type_type);
 const inline auto type_var = var_decl("type", type_type);
 const inline auto int_type = var_decl("int", type_type);
+const inline auto char_type = var_decl("char", type_type);
 // const inline auto bool_type = var_decl("bool");
 // might remove these later
 const inline auto int_token_assignment = detail::ctr_lambda(
@@ -39,6 +40,7 @@ const inline auto internal_divi = detail::ctr_lambda(
                  var_decl_ptr("RHS", int_type)),
     detail::divi);
 using int_literal = literal<size_t>;
+using char_literal = literal<unsigned char>;
 using double_literal = literal<double>;
 
 } // namespace selflang
