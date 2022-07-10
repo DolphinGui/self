@@ -14,7 +14,14 @@ constexpr auto file = "\
 fun main()->int{return 1;}";
 constexpr auto path = "a.o";
 constexpr auto output_name = "a.out";
-
+// this is not crossplatform in the slightest. I will have to figure out how to
+// query OS details about this later. but for now, this'll work.
+constexpr auto link_command =
+    R"(ld -pie --eh-frame-hdr -m elf_x86_64 -dynamic-linker \
+ /lib64/ld-linux-x86-64.so.2 /usr/lib64/Scrt1.o /usr/lib64/crti.o \
+ /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtbeginS.o -L/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0 \
+ -L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} -lc /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o \
+ /usr/lib64/crtn.o -o {})";
 int main() {
   auto AST = selflang::lex(file);
   std::cout << AST << '\n';
@@ -27,6 +34,6 @@ int main() {
     return 1;
   }
   selflang::compile(IR, aout);
-  auto command = fmt::format("ld {} -o{}", path, output_name);
+  auto command = fmt::format(link_command, path, output_name);
   std::system(command.c_str());
 }
