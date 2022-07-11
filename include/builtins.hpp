@@ -39,6 +39,8 @@ const inline auto internal_divi = detail::ctr_lambda(
     operator_def("/", int_type, var_decl_ptr("LHS", int_type),
                  var_decl_ptr("RHS", int_type)),
     detail::divi);
+const inline auto selfputchar =
+    fun_def("selfputchar", int_type, false, var_decl_ptr("c", char_type));
 using int_literal = literal<size_t>;
 using char_literal = literal<unsigned char>;
 using double_literal = literal<double>;

@@ -62,13 +62,15 @@ struct global_parser {
       }
       for (auto symbol : symbols) {
         if (symbol->getName() == maybe->get_token()) {
-          if (typeid(*symbol) == typeid(selflang::operator_def)) {
+          if (auto &hash = typeid(*symbol);
+              hash == typeid(selflang::operator_def)) {
             base = std::make_unique<selflang::op_call>(
                 reinterpret_cast<const selflang::operator_def &>(*symbol));
             return;
-          } else if (typeid(*symbol) == typeid(selflang::fun_def)) {
+          } else if (hash == typeid(selflang::fun_def)) {
             base = std::make_unique<selflang::fun_call>(
                 reinterpret_cast<const selflang::fun_def &>(*symbol));
+            return;
           }
           err_assert(false, "conflicting symbols");
         }
@@ -421,33 +423,63 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
     parse_symbol(ptr);
   }
 
-  for (auto it = tree.begin(); it != tree.end(); ++it) {
-    // if(typeid(*it) == typeid(selflang::fun))
+  // ok not sure why the end check doesn't work but I have to check
+  // if the tree is size 1
+  for (auto it = tree.begin(); it != tree.end() && tree.size() != 1; ++it) {
+    selflang::expression_tree arg;
+    if (auto *fun = reinterpret_cast<selflang::fun_call *>(it->get())) {
+      ++it;
+      if (auto *open_paren =
+              dynamic_cast<selflang::maybe_expression *>(it->get())) {
+        if (open_paren->get_token() == "(") {
+          it = tree.erase(it);
+          while (true) {
+            auto *token_maybe =
+                dynamic_cast<selflang::maybe_expression *>(it->get());
+            if (token_maybe) {
+              if (token_maybe->get_token() == ")") {
+                if (arg.size() > 0)
+                  fun->args.emplace_back(evaluate_tree(arg));
+                it = --tree.erase(it);
+                break;
+              } else if (token_maybe->get_token() == ",") {
+                fun->args.emplace_back(evaluate_tree(arg));
+                it = --tree.erase(it);
+              }
+            } else {
+              arg.push_back(std::move(*it));
+              it = --tree.erase(it);
+            }
+            ++it;
+          }
+        }
+      }
+    }
   }
 
   // left-right associative pass
   for (auto it = tree.begin(); it != tree.end(); ++it) {
-    if (auto *a = dynamic_cast<selflang::op_call *>(it->get());
-        a && !a->get_def().is_member()) {
+    if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
+        op && !op->get_def().is_member()) {
       auto lhs = it, rhs = it;
       --lhs, ++rhs;
       auto left = selflang::expression_ptr(lhs->release()),
            right = selflang::expression_ptr(rhs->release());
       tree.erase(rhs), it = tree.erase(lhs);
-      a->add_arg(std::move(left));
-      a->add_arg(std::move(right));
+      op->add_arg(std::move(left));
+      op->add_arg(std::move(right));
     }
   }
   // right-left associative pass
   for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
-    if (auto *a = dynamic_cast<selflang::op_call *>(it->get());
-        a && a->get_def().is_member()) {
+    if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
+        op && op->get_def().is_member()) {
       auto lhs = it, rhs = it;
       ++lhs, --rhs;
       auto left = selflang::expression_ptr(lhs->release()),
            right = selflang::expression_ptr(rhs->release());
-      a->add_arg(std::move(left));
-      a->add_arg(std::move(right));
+      op->add_arg(std::move(left));
+      op->add_arg(std::move(right));
       tree.erase(rhs.base());
       it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
     }
@@ -463,12 +495,8 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
 namespace selflang {
 expression_tree parse(token_vec in) {
   global_parser parser;
-  std::string debug;
   for (auto t : in) {
     parser.process(t);
-    std::stringstream s;
-    s << parser.syntax_tree << '\n';
-    debug = s.str();
   }
   auto result = std::move(parser.syntax_tree);
   return result;

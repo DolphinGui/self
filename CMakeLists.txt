@@ -54,19 +54,20 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 llvm_map_components_to_libnames(llvm_libs support core target codegen)
 
-add_compile_options(-fsanitize=address)
-add_link_options(-fsanitize=address)
-
-
 add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
 target_link_libraries(selfparse PUBLIC re2::re2)
+target_compile_options(selfparse PUBLIC -fsanitize=address)
+target_link_options(selfparse PUBLIC -fsanitize=address)
 
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)
 target_include_directories(selfgen PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfgen PROPERTY CXX_STANDARD 20)
 target_link_libraries(selfgen PRIVATE ${llvm_libs} ${TARGET_INFO})
+target_compile_options(selfgen PUBLIC -fsanitize=address)
+target_link_options(selfgen PUBLIC -fsanitize=address)
+
 
 add_library(selfstd
 ${STDLIB_SRC}/io.c)

@@ -9,6 +9,8 @@
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
+#include <llvm/IR/ValueSymbolTable.h>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
@@ -25,8 +27,34 @@ llvm::LLVMContext context;
 auto module = llvm::Module("todo: make module name meaningful", context);
 
 llvm::Value *dispatch(selflang::expression *expr, llvm::IRBuilder<> &builder);
-
-llvm::Value *fun_call_gen(selflang::op_call &fun, llvm::IRBuilder<> &builder) {
+llvm::Value *call_gen(selflang::fun_call_base &base,
+                      llvm::IRBuilder<> &builder) {
+  llvm::FunctionType *type;
+  {
+    std::vector<llvm::Type *> arg_types;
+    arg_types.reserve(base.definition.arguments.size());
+    std::transform(base.definition.arguments.begin(),
+                   base.definition.arguments.end(),
+                   std::back_inserter(arg_types),
+                   [](const std::unique_ptr<selflang::var_decl> &a) {
+                     return getType(*a);
+                   });
+    type = llvm::FunctionType::get(
+        selflang::getType(*base.definition.return_type), arg_types, false);
+  }
+  auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
+  auto *val = table.lookup(base.definition.getName());
+  auto callee = llvm::FunctionCallee(type, val);
+  std::vector<llvm::Value *> args;
+  args.reserve(base.args.size());
+  std::transform(base.args.begin(), base.args.end(), std::back_inserter(args),
+                 [&](const selflang::expression_ptr &a) -> llvm::Value * {
+                   return dispatch(a.get(), builder);
+                 });
+  return builder.CreateCall(callee, args);
+}
+llvm::Value *fun_call_gen(selflang::fun_call_base &fun,
+                          llvm::IRBuilder<> &builder) {
   llvm::Value *result = nullptr;
   switch (selflang::detail::hash_value(fun.get_def().hash)) {
   case selflang::detail::addi:
@@ -50,17 +78,16 @@ llvm::Value *fun_call_gen(selflang::op_call &fun, llvm::IRBuilder<> &builder) {
                                 dispatch(fun.args.at(1).get(), builder));
     break;
   case selflang::detail::none:
-    throw std::runtime_error(
-        "calling other functions is unimplemented for now.");
+    return call_gen(fun, builder);
     break;
   }
   return result;
 }
 
 llvm::Value *dispatch(selflang::expression *expr, llvm::IRBuilder<> &builder) {
-  if (auto &type = typeid(*expr); type == typeid(selflang::op_call)) {
-    return fun_call_gen(dynamic_cast<selflang::op_call &>(*expr), builder);
-  } else if (type == typeid(selflang::ret)) {
+  if (auto *fun = dynamic_cast<selflang::fun_call_base *>(expr)) {
+    return fun_call_gen(*fun, builder);
+  } else if (auto &type = typeid(*expr); type == typeid(selflang::ret)) {
     auto &ret = dynamic_cast<selflang::ret &>(*expr);
     if (ret.value) {
       return builder.CreateRet(dispatch(ret.value.get(), builder));
@@ -71,6 +98,10 @@ llvm::Value *dispatch(selflang::expression *expr, llvm::IRBuilder<> &builder) {
     return llvm::ConstantInt::get(
         llvm::Type::getInt32Ty(context),
         llvm::APInt(32, dynamic_cast<selflang::int_literal &>(*expr).value));
+  } else if (type == typeid(selflang::char_literal)) {
+    return llvm::ConstantInt::get(
+        llvm::Type::getInt8Ty(context),
+        llvm::APInt(8, dynamic_cast<selflang::char_literal &>(*expr).value));
   } else if (type == typeid(selflang::var_decl)) {
     auto &var = dynamic_cast<selflang::var_decl &>(*expr);
     return builder.CreateAlloca(getType(var), 0, var.getName());
@@ -86,7 +117,7 @@ void fun_gen(selflang::fun_def *fun) {
   std::transform(
       fun->arguments.begin(), fun->arguments.end(),
       std::back_inserter(arg_types),
-      [](std::unique_ptr<selflang::var_decl> &a) { return getType(*a); });
+      [](const std::unique_ptr<selflang::var_decl> &a) { return getType(*a); });
   auto type =
       llvm::FunctionType::get(getType(*fun->return_type), arg_types, false);
   auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
@@ -128,6 +159,9 @@ llvm::Type *getType(const var_decl &var) {
     }
     if (&var == &char_type) {
       return llvm::Type::getInt8Ty(context);
+    }
+    if(&var == &void_type){
+      return llvm::Type::getVoidTy(context);
     }
   }
   throw std::runtime_error("non ints not implemented right now");

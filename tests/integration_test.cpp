@@ -3,15 +3,37 @@
 #include "syntax_tree.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fmt/core.h>
 #include <iostream>
 #include <llvm/Support/raw_ostream.h>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
+// for some reason raw string does not include
+// newline. In a real file the semicolons are
+// not necessary.
+constexpr auto file = R"(
+fun selfputchar(c: char)->int;
+fun selfflush()->void;
+fun main()->int{
+  selfputchar('h');
+  selfputchar('e');
+  selfputchar('l');
+  selfputchar('l');
+  selfputchar('o');
+  selfputchar(' ');
+  selfputchar('w');
+  selfputchar('o');
+  selfputchar('r');
+  selfputchar('l');
+  selfputchar('d');
+  selfputchar('!');
+  selfflush();
+  return 0;
+}
 
-constexpr auto file = "\
-fun selfputchar(c: char)->int\n \
-fun main()->int{selfputchar('h');return 0;}";
+)";
 constexpr auto path = "a.o";
 constexpr auto output_name = "a.out";
 // this is not crossplatform in the slightest.
@@ -21,13 +43,21 @@ constexpr auto link_command =
     R"(ld -pie --eh-frame-hdr -m elf_x86_64 -dynamic-linker \
  /lib64/ld-linux-x86-64.so.2 /usr/lib64/Scrt1.o /usr/lib64/crti.o \
  /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtbeginS.o -L/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0 \
- -L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} -lc /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o \
+ -L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} {} -lc /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o \
  /usr/lib64/crtn.o -o {})";
+auto get_stdlib() {
+  auto working = std::filesystem::current_path();
+  for (auto &f : std::filesystem::directory_iterator(working)) {
+    if (f.path().filename() == "libselfstd.a") {
+      return f;
+    }
+  }
+  throw std::runtime_error("libselfstd.a not found");
+}
 int main() {
+  auto stdlib = get_stdlib();
   auto AST = selflang::lex(std::string(file));
-  std::cout << AST << '\n';
   auto &IR = selflang::codegen(AST);
-  IR.print(llvm::outs(), nullptr);
   std::error_code file_err;
   auto aout = llvm::raw_fd_ostream(path, file_err);
   if (file_err) {
@@ -35,6 +65,7 @@ int main() {
     return 1;
   }
   selflang::compile(IR, aout);
-  auto command = fmt::format(link_command, path, output_name);
-  // std::system(command.c_str());
+  auto command =
+      fmt::format(link_command, path, stdlib.path().c_str(), output_name);
+  std::system(command.c_str());
 }

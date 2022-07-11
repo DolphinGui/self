@@ -81,31 +81,17 @@ template <typename T> struct literal : public expression {
 };
 
 class maybe_expression : public expression {
-  variant<token, expression_ptr> contents;
+  token contents;
 
 public:
-  maybe_expression(token_view t) : contents(std::in_place_type_t<token>(), t) {}
-  maybe_expression(expression_ptr &&expr)
-      : contents(std::in_place_type_t<expression_ptr>(), std::move(expr)) {}
-  inline auto &get_expr() { return std::get<1>(contents); }
-  inline auto &get_token() { return std::get<0>(contents); }
-  void confirm(expression_ptr &&ptr) { contents.emplace<1>(std::move(ptr)); }
-
+  maybe_expression(token_view t) : contents(t) {}
+  inline token_view get_token() { return contents; }
   virtual std::ostream &print(std::ostream &stream) const override {
-    if (contents.index() == 0) {
-      stream << "unevaluated expression: \"" << std::get<0>(contents) << "\" ";
-    } else {
-      std::get<1>(contents)->print(stream);
-    }
-    return stream;
+    return stream << "unevaluated expression: \"" << contents << "\" ";
   }
   virtual bool is_complete() const override { return false; }
   virtual token_view getName() const noexcept override {
-    if (contents.index() == 0) {
-      return "unevaluated expression";
-    } else {
-      return std::get<1>(contents)->getName();
-    }
+    return "unevaluated expression";
   }
 };
 class var_decl;
@@ -229,27 +215,25 @@ public:
   inline string_view getName() const noexcept override { return "var ref"; }
 };
 
-class fun_call_base : public expression {
-  const fun_def &function;
-
-public:
+struct fun_call_base : public expression {
+  const fun_def &definition;
   expression_list args;
 
-  fun_call_base(const fun_def &Callee) : function(Callee) {}
+  fun_call_base(const fun_def &Callee) : definition(Callee) {}
   fun_call_base(const fun_def &callee, expression_list &&Args)
-      : function(callee), args(std::move(Args)) {}
+      : definition(callee), args(std::move(Args)) {}
   inline std::ostream &print(std::ostream &out) const override {
-    out << "function call: " << function << " args: (";
+    out << "function call: " << definition << " args: (";
     for (const auto &arg : args) {
       out << *arg.get() << ' ';
     }
     out << ')';
     return out;
   }
-  const fun_def &get_def() const noexcept { return function; }
+  const fun_def &get_def() const noexcept { return definition; }
   // TODO: make this check types later.
   bool is_complete() const noexcept override {
-    return function.arguments.size() == args.size();
+    return definition.arguments.size() == args.size();
   }
   void add_arg(expression_ptr &&in) { args.push_back(std::move(in)); }
 };
