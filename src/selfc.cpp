@@ -1,4 +1,4 @@
-#include <argh/argh.h>
+#include <argh.h>
 #include <exception>
 #include <fstream>
 #include <iostream>

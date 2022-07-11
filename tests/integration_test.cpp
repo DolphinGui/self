@@ -24,7 +24,7 @@ constexpr auto link_command =
  -L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} -lc /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o \
  /usr/lib64/crtn.o -o {})";
 int main() {
-  auto AST = selflang::lex(file);
+  auto AST = selflang::lex(std::string(file));
   std::cout << AST << '\n';
   auto &IR = selflang::codegen(AST);
   IR.print(llvm::outs(), nullptr);

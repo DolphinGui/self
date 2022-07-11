@@ -1,12 +1,6 @@
 #pragma once
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Type.h>
 #include <memory>
 #include <sstream>
-
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Type.h>
-#include <llvm/IR/Value.h>
 
 #include "container_types.hpp"
 namespace selflang {

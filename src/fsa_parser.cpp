@@ -461,7 +461,7 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
 } // namespace
 
 namespace selflang {
-expression_tree parse(token_vec &in) {
+expression_tree parse(token_vec in) {
   global_parser parser;
   std::string debug;
   for (auto t : in) {

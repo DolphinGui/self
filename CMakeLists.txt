@@ -6,9 +6,40 @@ set(COMPILER_SRC ${CMAKE_SOURCE_DIR}/src)
 set(STDLIB_SRC ${CMAKE_SOURCE_DIR}/stdlib)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 
-find_package(argh REQUIRED)
-find_package(re2 REQUIRED)
-find_package(fmt REQUIRED)
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    option(GIT_SUBMODULE "Check submodules during build" ON)
+    if(GIT_SUBMODULE)
+        message(STATUS "Submodule update")
+        execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                        RESULT_VARIABLE GIT_SUBMOD_RESULT)
+        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
+            message(FATAL_ERROR "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
+        endif()
+    endif()
+endif()
+
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/argh/CMakeLists.txt"
+ OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/fmt/CMakeLists.txt"
+ OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/re2/CMakeLists.txt")
+    message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+endif()
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/deps/argh)
+add_subdirectory(${CMAKE_SOURCE_DIR}/deps/re2)
+add_subdirectory(${CMAKE_SOURCE_DIR}/deps/fmt)
+
+if(NOT TARGET re2::re2)
+  message(FATAL_ERROR "re2 has failed to build")
+endif()
+if(NOT TARGET argh)
+  message(FATAL_ERROR "argh has failed to build")
+endif()
+if(NOT TARGET fmt::fmt)
+  message(FATAL_ERROR "fmt has failed to build")
+endif()
+
 
 find_package(LLVM REQUIRED CONFIG)
 include_directories(${LLVM_INCLUDE_DIRS})
@@ -26,15 +57,16 @@ llvm_map_components_to_libnames(llvm_libs support core target codegen)
 add_compile_options(-fsanitize=address)
 add_link_options(-fsanitize=address)
 
+
 add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfparse PRIVATE re2::re2)
+target_link_libraries(selfparse PUBLIC re2::re2)
 
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)
 target_include_directories(selfgen PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfgen PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfgen ${llvm_libs} ${TARGET_INFO})
+target_link_libraries(selfgen PRIVATE ${llvm_libs} ${TARGET_INFO})
 
 add_library(selfstd
 ${STDLIB_SRC}/io.c)
@@ -50,11 +82,7 @@ endif()
 add_executable(selfc ${COMPILER_SRC}/selfc.cpp)
 target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfc PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfc selfparse argh::argh)
-
-add_executable(regex_test ${CMAKE_SOURCE_DIR}/tests/regex_test.cpp)
-set_property(TARGET regex_test PROPERTY CXX_STANDARD 20)
-target_link_libraries(regex_test re2::re2)
+target_link_libraries(selfc selfparse argh)
 
 add_executable(lex_test ${CMAKE_SOURCE_DIR}/tests/lex_test.cpp)
 set_property(TARGET lex_test PROPERTY CXX_STANDARD 20)

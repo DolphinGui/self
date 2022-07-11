@@ -1,0 +1,9 @@
+[submodule "deps/re2"]
+	path = deps/re2
+	url = https://github.com/google/re2.git
+[submodule "deps/argh"]
+	path = deps/argh
+	url = https://github.com/adishavit/argh.git
+[submodule "deps/fmt"]
+	path = deps/fmt
+	url = https://github.com/fmtlib/fmt.git
