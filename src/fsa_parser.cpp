@@ -88,15 +88,11 @@ template <typename T> struct token_it_t {
 using token_it = token_it_t<std::vector<selflang::token>>;
 
 struct global_parser {
-  // syntax tree must be first because of initialization rules
-  selflang::expression_tree syntax_tree;
-  std::vector<selflang::expression_tree *> context_stack;
   static inline std::string err_string;
   // might want to make this a dictionary instead of a list. might scale better
   // for large type lists.
   selflang::type_list types;
   std::vector<const selflang::expression *> symbols;
-  std::vector<selflang::expression_ptr> current;
   using self = global_parser;
   // todo: add proper compile error reporting later.
   auto err_assert(bool condition, std::string_view message) {
@@ -146,37 +142,9 @@ struct global_parser {
       return;
     }
   }
-  void evaluate() {
-    auto curr = std::move(current.back());
-    current.pop_back();
-    auto &tree = dynamic_cast<selflang::expression_tree &>(*curr.get());
-    current.push_back(evaluate_tree(tree));
-  }
-  enum struct decl_states { init, var, fun, expr };
-  enum struct exec_states { init, start, var, expr, ret };
-  enum struct var_states { init, named, semicolon, type_annotated, expr };
-  enum struct struct_states { init, start, var, fun, opaque, sized };
-  enum struct fun_states {
-    init,
-    named,
-    arg_start,
-    arg_named,
-    arg_colon,
-    arg_finished,
-    args_specified,
-    forwarded,
-    arrow,
-    declared,
-    parsing
-  };
-  decl_states fsa_state = decl_states::init;
-  var_states var_state = var_states::init;
-  fun_states fun_state = fun_states::init;
-  exec_states fun_inner_state = exec_states::start;
-  struct_states struct_state = struct_states::init;
   using callback = std::function<void(selflang::expression_tree &)>;
 
-  selflang::expression_ptr expr_parse(token_it& t, callback start = nullptr) {
+  selflang::expression_ptr expr_parse(token_it &t, callback start = nullptr) {
     auto tree = std::make_unique<selflang::expression_tree>();
     if (start) {
       start(*tree);
@@ -188,8 +156,7 @@ struct global_parser {
     return result;
   }
 
-  selflang::expression_ptr var_parse(token_it& t) {
-    using enum var_states;
+  selflang::expression_ptr var_parse(token_it &t) {
     using namespace selflang::reserved;
     const auto guard = [this](auto t) {
       if (!reserved_guard(t)) {
@@ -217,13 +184,11 @@ struct global_parser {
     }
   }
 
-  selflang::expression_ptr fun_parse(token_it& t) {
-    using enum fun_states;
+  selflang::expression_ptr fun_parse(token_it &t) {
     err_assert(reserved_guard(*t),
                "reserved token cannot be used as function name");
     auto curr = std::make_unique<selflang::fun_def>(*t++);
     err_assert(*t++ == "(", "\"(\" expected");
-    fun_state = arg_start;
     while (*t != ")") {
       err_assert(reserved_guard(*t),
                  "reserved token cannot be used as parameter name");
@@ -261,7 +226,9 @@ struct global_parser {
     return curr;
   }
 
-  void process(token_it t) {
+  selflang::expression_tree process(token_it t) {
+
+    selflang::expression_tree syntax_tree;
     using namespace selflang::reserved;
     if (*t == var_t) {
       syntax_tree.emplace_back(var_parse(++t));
@@ -270,6 +237,7 @@ struct global_parser {
     } else if (reserved_guard(*t)) {
       syntax_tree.emplace_back(expr_parse(t));
     }
+    return syntax_tree;
   }
 
   global_parser() {
@@ -283,7 +251,6 @@ struct global_parser {
     symbols.push_back(&selflang::internal_subi);
     symbols.push_back(&selflang::internal_muli);
     symbols.push_back(&selflang::internal_divi);
-    context_stack.push_back(&syntax_tree);
   }
 };
 static void subtree_pass(selflang::expression_tree &tree, auto begin,
@@ -402,8 +369,7 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
 namespace selflang {
 expression_tree parse(token_vec in) {
   global_parser parser;
-  parser.process(token_it{in});
-  auto result = std::move(parser.syntax_tree);
+  auto result = parser.process(token_it{in});
   return result;
 }
 } // namespace selflang
