@@ -44,5 +44,21 @@ const inline auto selfputchar =
 using int_literal = literal<size_t>;
 using char_literal = literal<unsigned char>;
 using double_literal = literal<double>;
+template <> struct literal<vector<unsigned char>> : public expression {
+  vector<unsigned char> value;
+  literal(vector<unsigned char> itself) : value(itself){};
+  inline std::ostream &print(std::ostream &out) const override {
+    out << "literal: ";
+    for (char c : value) {
+      out << c;
+    }
+    return out;
+  }
+  inline token_view getName() const noexcept override {
+    return "literal value";
+  };
+};
+
+using string_literal = literal<vector<unsigned char>>;
 
 } // namespace selflang

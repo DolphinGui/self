@@ -17,6 +17,7 @@ constexpr auto file = R"(
 fun selfputchar(c: char)->int;
 fun selfflush()->void;
 fun main()->int{
+  "this is a string\n";
   selfputchar('h');
   selfputchar('e');
   selfputchar('l');
@@ -57,14 +58,15 @@ auto get_stdlib() {
 int main() {
   auto stdlib = get_stdlib();
   auto AST = selflang::lex(std::string(file));
-  auto &IR = selflang::codegen(AST);
+  auto IR = selflang::codegen(AST);
+  IR->print(llvm::outs(), nullptr);
   std::error_code file_err;
   auto aout = llvm::raw_fd_ostream(path, file_err);
   if (file_err) {
     llvm::errs() << "Could not open file: " << file_err.message();
     return 1;
   }
-  selflang::compile(IR, aout);
+  selflang::compile(*IR, aout);
   auto command =
       fmt::format(link_command, path, stdlib.path().c_str(), output_name);
   std::system(command.c_str());

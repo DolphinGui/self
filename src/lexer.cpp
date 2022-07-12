@@ -31,7 +31,7 @@ auto token_parse(string whole) {
   token_vec token_list;
   while (RE2::FindAndConsume(
       &input,
-      R"(((?:->)|\(|\)|{|}|\[|\]|(?:'.+')|;|,|<|>|:|[^<>\s(){};,\[\]':]+))",
+      R"(((?:->)|\(|\)|{|}|\[|\]|(?:'.+')|(?:".+")|;|,|<|>|:|[^<>\s(){};,\[\]'":]+))",
       &cur_token)) {
     token_list.push_back(cur_token);
   }

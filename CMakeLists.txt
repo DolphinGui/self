@@ -6,29 +6,17 @@ set(COMPILER_SRC ${CMAKE_SOURCE_DIR}/src)
 set(STDLIB_SRC ${CMAKE_SOURCE_DIR}/stdlib)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 
-find_package(Git QUIET)
-if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
-    option(GIT_SUBMODULE "Check submodules during build" ON)
-    if(GIT_SUBMODULE)
-        message(STATUS "Submodule update")
-        execute_process(COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
-                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        RESULT_VARIABLE GIT_SUBMOD_RESULT)
-        if(NOT GIT_SUBMOD_RESULT EQUAL "0")
-            message(FATAL_ERROR "git submodule update --init --recursive failed with ${GIT_SUBMOD_RESULT}, please checkout submodules")
-        endif()
-    endif()
-endif()
-
 if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/argh/CMakeLists.txt"
  OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/fmt/CMakeLists.txt"
- OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/re2/CMakeLists.txt")
+ OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/re2/CMakeLists.txt"
+ OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/trash_bin/CMakeLists.txt")
     message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
 endif()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/deps/argh)
 add_subdirectory(${CMAKE_SOURCE_DIR}/deps/re2)
 add_subdirectory(${CMAKE_SOURCE_DIR}/deps/fmt)
+add_subdirectory(${CMAKE_SOURCE_DIR}/deps/trash_bin)
 
 if(NOT TARGET re2::re2)
   message(FATAL_ERROR "re2 has failed to build")
@@ -38,6 +26,9 @@ if(NOT TARGET argh)
 endif()
 if(NOT TARGET fmt::fmt)
   message(FATAL_ERROR "fmt has failed to build")
+endif()
+if(NOT TARGET trash_bin)
+  message(FATAL_ERROR "trash bin has failed to build")
 endif()
 
 
@@ -58,15 +49,16 @@ add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
 target_link_libraries(selfparse PUBLIC re2::re2)
-target_compile_options(selfparse PUBLIC -fsanitize=address)
-target_link_options(selfparse PUBLIC -fsanitize=address)
-
+# target_compile_options(selfparse PUBLIC -fsanitize=address)
+# target_link_options(selfparse PUBLIC -fsanitize=address)
+# For now I haven't been having mem leak issues, and the
+# indirect leak warnings from llvm have been pretty annoying.
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)
 target_include_directories(selfgen PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfgen PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfgen PRIVATE ${llvm_libs} ${TARGET_INFO})
-target_compile_options(selfgen PUBLIC -fsanitize=address)
-target_link_options(selfgen PUBLIC -fsanitize=address)
+target_link_libraries(selfgen PRIVATE ${llvm_libs} ${TARGET_INFO} trash_bin)
+# target_compile_options(selfgen PUBLIC -fsanitize=address)
+# target_link_options(selfgen PUBLIC -fsanitize=address)
 
 
 add_library(selfstd

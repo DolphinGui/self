@@ -4,25 +4,58 @@
 #include "literals.hpp"
 #include "syntax_tree.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace {
 auto is_integer(selflang::token_view t) {
   char *p;
-  auto number = strtol(t.data(), &p, 10);
+  auto number = std::strtol(t.data(), &p, 10);
   return std::pair{*p == 0, number};
 }
 
 auto is_char(selflang::token_view t) {
-  if (t.at(0) != '\'')
+  if (t.front() != '\'')
     return std::pair{false, (unsigned char)'\0'};
   if (t.length() != 3)
     return std::pair{false, (unsigned char)'\0'};
   return std::pair{true, (unsigned char)t.at(1)};
+}
+
+std::pair<bool, selflang::string> is_str(selflang::token_view t) {
+  if (t.front() != '\'' && t.front() != '\"')
+    return {false, ""};
+  if (!t.ends_with('\'') && !t.ends_with('\"'))
+    return {false, ""};
+  auto literal = selflang::string(t);
+  for (auto c = literal.begin(); c != literal.end(); ++c) {
+    if (*c == '\\') {
+      auto mark = c;
+      ++c;
+      if (std::isdigit(*c)) {
+        char *end;
+        auto value = std::strtol(&*c, &end, 10);
+        if (value > std::numeric_limits<unsigned char>::max()) {
+          throw std::runtime_error("escaped char value is too big.");
+        }
+        // this is a stupid workaround but I guess it'll work
+        auto distance = std::distance(&*c, end);
+        literal.erase(c, c + 1 + distance);
+        *mark = value;
+      } else if (*c == 'n') {
+        *mark = '\n';
+        literal.erase(c);
+      }
+    }
+  }
+  return {true, selflang::string(t.substr(1, t.length() - 2))};
 }
 
 constexpr auto reserved_guard = [](auto t) {
@@ -58,6 +91,12 @@ struct global_parser {
         return;
       } else if (auto [result, c] = is_char(t); result) {
         base = std::make_unique<selflang::char_literal>(c);
+        return;
+      } else if (auto [result, str] = is_str(t); result) {
+        selflang::vector<unsigned char> value;
+        value.reserve(str.size());
+        std::copy(str.begin(), str.end(), std::back_inserter(value));
+        base = std::make_unique<selflang::string_literal>(value);
         return;
       }
       for (auto symbol : symbols) {
