@@ -14,7 +14,6 @@ inline void iterate(auto lambda, auto &&arg, auto &&...args) {
 }
 } // namespace detail
 
-
 struct fun_def_base : public expression {
   token name;
   std::vector<std::unique_ptr<var_decl>> arguments;
@@ -71,9 +70,9 @@ struct fun_call_base : public expression {
   fun_call_base(const fun_def_base &callee, expression_list &&Args)
       : definition(callee), args(std::move(Args)) {}
   inline std::ostream &print(std::ostream &out) const override {
-    out << "function call: " << definition << " args: (";
+    out << "call: " << definition.getName() << " args: (";
     for (const auto &arg : args) {
-      out << *arg.get() << ' ';
+      out << *arg.get() << ", ";
     }
     out << ')';
     return out;

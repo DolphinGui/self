@@ -3,22 +3,23 @@
 
 namespace selflang{
   std::ostream & fun_def_base::print(std::ostream &out) const {
-    out << "function: " << name;
-    if (return_type) {
-      out << " returns " << *return_type;
-    }
-
+    out << "fun " << name;
     if (!arguments.empty()) {
-      out << "\nargs: ";
+      out << '(';
       for (auto &arg : arguments) {
-        out << *arg << '\n';
+        out << *arg << ',';
       }
+      out<< ')';
+    }
+    if (return_type) {
+      out << " -> " << *return_type;
     }
     if (!body.empty()) {
-      out << "\nbody:\n";
+      out << "{";
       for (auto &p : body) {
         out << *p.get();
       }
+      out << '}';
     }
     return out;
   }

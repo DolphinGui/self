@@ -6,7 +6,7 @@
 #include "lexer.hpp"
 
 constexpr std::string_view var_decl_test = "var a: byte";
-constexpr std::string_view expr_test = "var a = 1 + (2 - 5 / 3) * 2";
+constexpr std::string_view expr_test = "var a = 1 + ((2 - 5) / 3) * 2";
 constexpr std::string_view fun_def_test = "\
 fun main()->int{return 0;}";
 int main() {

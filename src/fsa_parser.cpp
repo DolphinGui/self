@@ -495,6 +495,9 @@ static void subtree_pass(selflang::expression_tree &tree, auto begin,
       }
     }
   }
+  if (tree.nullcheck()) {
+    throw std::runtime_error("nullcheck failed");
+  }
 }
 static void subtree_pass(selflang::expression_tree &tree) {
   return subtree_pass(tree, tree.begin(), tree.end());
@@ -505,9 +508,6 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
   for (auto &ptr : tree) {
     parse_symbol(ptr);
   }
-
-  auto a = tree.dump();
-  auto b = tree.nullcheck();
 
   // ok not sure why the end check doesn't work but I have to check
   // if the tree is size 1
@@ -546,10 +546,11 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
     }
   }
 
+  auto a = tree.dump();
   // left-right associative pass
   for (auto it = tree.begin(); it != tree.end(); ++it) {
     if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
-        op && !op->get_def().is_member()) {
+        op && !op->get_def().is_member() && op->args.empty()) {
       auto lhs = it, rhs = it;
       --lhs, ++rhs;
       auto left = selflang::expression_ptr(lhs->release()),
@@ -562,7 +563,7 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
   // right-left associative pass
   for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
     if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
-        op && op->get_def().is_member()) {
+        op && op->get_def().is_member() && op->args.empty()) {
       auto lhs = it, rhs = it;
       ++lhs, --rhs;
       auto left = selflang::expression_ptr(lhs->release()),

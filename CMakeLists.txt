@@ -9,7 +9,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/argh/CMakeLists.txt"
  OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/fmt/CMakeLists.txt"
  OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/re2/CMakeLists.txt")
-    message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+    message(FATAL_ERROR "The submodules were not downloaded!.")
 endif()
 # Yes I know this is probably bad no I am not
 # dealing with bizzare issues that crop up from

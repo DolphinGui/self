@@ -26,10 +26,9 @@ public:
   token_view getName() const noexcept override { return name; }
   inline std::ostream &print(std::ostream &out) const override {
     if (type.ptr)
-      return out << "variable declaration: " << type.ptr->getName() << ", "
-                 << name;
+      return out << "var " << name << ": " << type.ptr->getName();
     else
-      return out << "variable declaration: indeterminate type,  " << name;
+      return out << "var  " << name;
   }
   bool is_complete() const override { return type.ptr; }
   void complete_types() override {}
