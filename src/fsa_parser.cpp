@@ -7,11 +7,13 @@
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
+#include <vector>
 
 #include "ast/control.hpp"
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 #include "ast/functions.hpp"
+#include "ast/struct_def.hpp"
 #include "ast/unevaluated_expression.hpp"
 #include "ast/variables.hpp"
 #include "builtins.hpp"
@@ -66,6 +68,24 @@ constexpr auto reserved_guard = [](auto t) {
   return !selflang::reserved::is_keyword(t) &&
          !selflang::reserved::is_grammar(t);
 };
+template <typename T> struct token_it_t {
+  T &where;
+  size_t pos = 0;
+  selflang::token_view operator*() { return where.at(pos); }
+  token_it_t &operator++() {
+    if (pos >= where.size()) {
+      throw std::runtime_error("out of bounds");
+    }
+    ++pos;
+    return *this;
+  }
+  token_it_t operator++(int) {
+    token_it_t tmp = *this;
+    this->operator++();
+    return tmp;
+  }
+};
+using token_it = token_it_t<std::vector<selflang::token>>;
 
 struct global_parser {
   // syntax tree must be first because of initialization rules
@@ -132,11 +152,10 @@ struct global_parser {
     auto &tree = dynamic_cast<selflang::expression_tree &>(*curr.get());
     current.push_back(evaluate_tree(tree));
   }
-  enum struct decl_states { start, init, var, fun, expr };
-  enum struct exec_states { start, init, var, expr, ret };
+  enum struct decl_states { init, var, fun, expr };
+  enum struct exec_states { init, start, var, expr, ret };
   enum struct var_states { init, named, semicolon, type_annotated, expr };
-  enum struct expr_states { init, processing };
-  enum struct struct_states { init, var, fun };
+  enum struct struct_states { init, start, var, fun, opaque, sized };
   enum struct fun_states {
     init,
     named,
@@ -152,306 +171,104 @@ struct global_parser {
   };
   decl_states fsa_state = decl_states::init;
   var_states var_state = var_states::init;
-  expr_states expr_state = expr_states::init;
   fun_states fun_state = fun_states::init;
   exec_states fun_inner_state = exec_states::start;
-  using callback = std::function<void()>;
+  struct_states struct_state = struct_states::init;
+  using callback = std::function<void(selflang::expression_tree &)>;
 
-  void eat_prev() {
-    auto prev = std::move(current.back());
-    current.pop_back();
-    auto curr = std::make_unique<selflang::expression_tree>();
-    curr->push_back(std::move(prev));
-    current.push_back(std::move(curr));
-  }
-
-  bool expr_parse(selflang::token_view t, callback start = nullptr,
-                  callback insert_call = nullptr) {
-    using enum expr_states;
-    switch (expr_state) {
-    case init:
-      if (start)
-        start();
-      else {
-        current.push_back(std::make_unique<selflang::expression_tree>());
-      }
-      expr_state = processing;
-      [[fallthrough]];
-    case processing:
-      if (t == selflang::reserved::endl) {
-        evaluate();
-        if (!insert_call) {
-          context_stack.back()->emplace_back(std::move(current.back()));
-          current.pop_back();
-        } else {
-          insert_call();
-        }
-        expr_state = init;
-        return true;
-      } else {
-        auto &curr_expr =
-            dynamic_cast<selflang::expression_tree &>(*current.back());
-        curr_expr.push_back(
-            std::make_unique<selflang::unevaluated_expression>(t));
-      }
-      break;
+  selflang::expression_ptr expr_parse(token_it& t, callback start = nullptr) {
+    auto tree = std::make_unique<selflang::expression_tree>();
+    if (start) {
+      start(*tree);
     }
-    return false;
+    while (*t != selflang::reserved::endl) {
+      tree->push_back(std::make_unique<selflang::unevaluated_expression>(*t++));
+    }
+    auto result = evaluate_tree(*tree);
+    return result;
   }
 
-  bool var_parse(selflang::token_view t) {
+  selflang::expression_ptr var_parse(token_it& t) {
     using enum var_states;
     using namespace selflang::reserved;
-    switch (var_state) {
-    case init:
-      if (reserved_guard(t)) {
-        current.push_back(std::make_unique<selflang::var_decl>(t));
-        var_state = named;
-      } else {
+    const auto guard = [this](auto t) {
+      if (!reserved_guard(t)) {
         std::stringstream err;
         err << "token " << t << " is reserved";
         err_assert(false, err.str());
       }
-      break;
-    case named:
-      if (t == ":") {
-        var_state = semicolon;
-        break;
-      } else if (reserved_guard(t)) {
-        var_state = expr;
-        [[fallthrough]];
-      }
-    case expr:
-      if (expr_parse(t, [this] { eat_prev(); })) {
-        var_state = init;
-        return true;
-      }
-      break;
-    case semicolon:
-      if (reserved_guard(t)) {
-        // TODO: deal with multiple candidates
-        auto candidates = types.find(t);
-        err_assert(candidates != types.end(), "type not found");
-        reinterpret_cast<selflang::var_decl &>(*current.back()).type.ptr =
-            candidates->second;
-        var_state = type_annotated;
-      }
-      break;
-    case type_annotated:
-      if (t == endl) {
-        context_stack.back()->emplace_back(std::move(current.back()));
-        current.pop_back();
-        var_state = init;
-      }
-      return true;
-    }
-    return false;
-  }
-
-  bool fun_parse(selflang::token_view t) {
-    using enum fun_states;
-    selflang::fun_def *fun_ptr;
-    if (!current.empty())
-      fun_ptr = dynamic_cast<selflang::fun_def *>(current.back().get());
-    else
-      fun_ptr = nullptr;
-    switch (fun_state) {
-    case init: {
-      if (reserved_guard(t)) {
-        current.push_back(std::make_unique<selflang::fun_def>(t));
-        fun_state = named;
-      } else
-        err_assert(false, "token is reserved");
-      break;
-    }
-    case named: {
-      if (t == "(") {
-        fun_state = arg_start;
-      } else
-        err_assert(false, "\"(\" expected");
-      break;
-    }
-    case arg_start: {
-      if (t == ")") {
-        fun_state = args_specified;
-      } else if (reserved_guard(t)) {
-        fun_ptr->arguments.emplace_back(
-            std::make_unique<selflang::var_decl>(t));
-        fun_state = arg_named;
-      } else
-        err_assert(false, "argument or \")\" expected");
-      break;
-    }
-    case arg_named: {
-      if (t == ":") {
-        fun_state = arg_colon;
-      } else
-        err_assert(false, "\":\" expected");
-      break;
-    }
-    case arg_colon: {
-      auto candidates = types.find(t);
-      err_assert(candidates != types.end(), "no types found");
-      fun_ptr->arguments.back()->type.ptr = candidates->second;
-      fun_state = arg_finished;
-      break;
-    }
-    case arg_finished: {
-      if (t == ")") {
-        fun_state = args_specified;
-      } else if (t == ",") {
-        fun_state = arg_start;
-      } else {
-        err_assert(false, "unknown token");
-      }
-      break;
-    }
-    case args_specified: {
-      if (t == "->") {
-        fun_state = arrow;
-      } else if (t == "{") {
-        fun_state = parsing;
-      } else {
-        err_assert(false, "\"{\" or \"->\" expected.");
-      }
-      break;
-    }
-    case arrow: {
-      auto candidates = types.find(t);
+    };
+    guard(*t);
+    auto curr = std::make_unique<selflang::var_decl>(*t++);
+    if (*t == ":") {
+      ++t;
+      // TODO: deal with multiple candidates
+      auto candidates = types.find(*t++);
       err_assert(candidates != types.end(), "type not found");
-      fun_ptr->return_type = candidates->second;
-      fun_state = forwarded;
-      break;
+      curr->type.ptr = candidates->second;
+      err_assert(*t == endl, "end of line expected");
+      return curr;
+    } else {
+      err_assert(reserved_guard(*t),
+                 "non-reserved token expected in expression");
+      return expr_parse(t, [&](selflang::expression_tree &tree) {
+        tree.push_back(std::move(curr));
+      });
     }
-    case forwarded: {
-      fun_ptr->body_defined = false;
-      if (t == "{") {
-        fun_state = parsing;
-      } else if (t == ";") {
-        symbols.push_back(current.back().get());
-        context_stack.back()->push_back(std::move(current.back()));
-        current.pop_back();
-        fun_state = init;
-        return true;
-      } else {
-        err_assert(false, "\"{\" or \"->\" expected.");
-      }
-      break;
-    }
-    case declared: {
-      if (t == "{")
-        fun_state = parsing;
-      else if (t == selflang::reserved::endl) {
-        context_stack.back()->push_back(std::move(current.back()));
-        current.pop_back();
-        fun_state = init;
-        return true;
-      } else
-        err_assert(false, "\"{\" expected.");
-      break;
-    }
-    case parsing: {
-      using enum exec_states;
-      using namespace selflang::reserved;
-      switch (fun_inner_state) {
-      case start: {
-        context_stack.push_back(&fun_ptr->body);
-        fun_inner_state = init;
-      }
-      case init: {
-        if (t == var_t) {
-          fun_inner_state = var;
-          break;
-        } else if (t == return_t) {
-          current.push_back(std::make_unique<selflang::ret>());
-          fun_inner_state = ret;
-          break;
-        } else if (reserved_guard(t)) {
-          fun_inner_state = expr;
-          [[fallthrough]];
-        } else if (t == "}") {
-          context_stack.pop_back();
-          symbols.push_back(current.back().get());
-          context_stack.back()->emplace_back(std::move(current.back()));
-          current.pop_back();
-          fun_ptr->body_defined = true;
-          fun_state = fun_states::init;
-          fun_inner_state = start;
-          return true;
-        } else {
-          err_assert(false, "Unexpected token");
-        }
-      }
-      case expr: {
-        if (expr_parse(t)) {
-          fun_inner_state = init;
-        }
-        break;
-      }
-      case var: {
-        if (var_parse(t))
-          fun_inner_state = init;
-        break;
-      }
-      case ret: {
-        const auto insert = [this] {
-          auto expr = std::move(current.back());
-          current.pop_back();
-          dynamic_cast<selflang::ret &>(*current.back()).value =
-              std::move(expr);
-          context_stack.back()->push_back(std::move(current.back()));
-          current.pop_back();
-        };
-        if (t == endl && expr_state == expr_states::init) {
-          context_stack.back()->push_back(std::move(current.back()));
-          current.pop_back();
-        } else {
-          if (expr_parse(t, nullptr, insert)) {
-            fun_inner_state = init;
-          }
-        }
-        break;
-      }
-      }
-      break;
-    }
-    }
-    return false;
   }
 
-  bool struct_parse(selflang::token_view t) {}
+  selflang::expression_ptr fun_parse(token_it& t) {
+    using enum fun_states;
+    err_assert(reserved_guard(*t),
+               "reserved token cannot be used as function name");
+    auto curr = std::make_unique<selflang::fun_def>(*t++);
+    err_assert(*t++ == "(", "\"(\" expected");
+    fun_state = arg_start;
+    while (*t != ")") {
+      err_assert(reserved_guard(*t),
+                 "reserved token cannot be used as parameter name");
+      curr->arguments.emplace_back(std::make_unique<selflang::var_decl>(*t++));
+      err_assert(*t++ == ":", "\":\" expected here");
+      // todo make this an expression instead of hardcoded
+      auto candidates = types.find(*t);
+      err_assert(candidates != types.end(), "no types found");
+      curr->arguments.back()->type.ptr = candidates->second;
+      err_assert(*t == ")" || *t == ",", "\")\" or \",\" expected");
+    }
+    if (*t == "->") {
+      ++t;
+      auto candidates = types.find(*t++);
+      err_assert(candidates != types.end(), "type not found");
+      curr->return_type = candidates->second;
+      curr->body_defined = false;
+    }
+    if (*t == "{") {
+      while (*t != "}") {
+        using namespace selflang::reserved;
+        if (*t == var_t) {
+          return var_parse(t);
+        } else if (*t++ == return_t) {
+          if (*t != endl) {
+            curr->body.push_back(
+                std::make_unique<selflang::ret>(expr_parse(t)));
+          }
+          curr->body.push_back(std::make_unique<selflang::ret>());
+        } else if (reserved_guard(*t)) {
+          curr->body.push_back(expr_parse(t));
+        }
+      }
+    }
+    return curr;
+  }
 
-  void process(selflang::token_view t) {
-    using enum decl_states;
+  void process(token_it t) {
     using namespace selflang::reserved;
-    switch (fsa_state) {
-    case start:
-    case init:
-      if (t == var_t) {
-        fsa_state = var;
-        break;
-      } else if (t == fun_t) {
-        fsa_state = fun;
-        break;
-      } else if (reserved_guard(t)) {
-        fsa_state = expr;
-        [[fallthrough]];
-      } else {
-        break; /*does absolutely nothing.*/
-      }
-    case expr:
-      if (expr_parse(t)) {
-        fsa_state = init;
-      }
-      break;
-    case var:
-      if (var_parse(t))
-        fsa_state = init;
-      break;
-    case fun:
-      if (fun_parse(t))
-        fsa_state = init;
-      break;
+    if (*t == var_t) {
+      syntax_tree.emplace_back(var_parse(++t));
+    } else if (*t == fun_t) {
+      syntax_tree.emplace_back(fun_parse(++t));
+    } else if (reserved_guard(*t)) {
+      syntax_tree.emplace_back(expr_parse(t));
     }
   }
 
@@ -585,9 +402,7 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
 namespace selflang {
 expression_tree parse(token_vec in) {
   global_parser parser;
-  for (auto t : in) {
-    parser.process(t);
-  }
+  parser.process(token_it{in});
   auto result = std::move(parser.syntax_tree);
   return result;
 }

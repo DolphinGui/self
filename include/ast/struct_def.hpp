@@ -4,12 +4,30 @@
 #include <vector>
 
 #include "ast/expression.hpp"
+#include "ast/expression_tree.hpp"
 
 namespace selflang {
 class var_decl;
 struct fun_def_base;
 struct struct_def : public expression {
-  std::vector<std::unique_ptr<var_decl>> member_var;
-  std::vector<std::unique_ptr<fun_def_base>> member_fun;
+  expression_tree body;
+  std::ostream &print(std::ostream &out) const override {
+    out << "struct decl: ";
+    for (auto &m : body) {
+      out << *m << ' ';
+    }
+    return out;
+  }
+  token_view getName() const noexcept override { return "struct decl"; };
+};
+struct opaque_struct : public expression {
+  size_t size = 0;
+  std::ostream &print(std::ostream &out) const override {
+    out << "opaque struct" << size;
+    if (size)
+      out << " size " << size;
+    return out;
+  }
+  token_view getName() const noexcept override { return "opaque struct"; };
 };
 } // namespace selflang

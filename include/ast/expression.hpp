@@ -15,12 +15,12 @@ using token_view = std::string_view;
 // would love to do this with variant types
 struct expression {
   virtual ~expression() = default;
-  virtual std::ostream &print(std::ostream &) const = 0;
   virtual bool is_complete() const { return true; };
   virtual void complete_types() {}
   friend std::ostream &operator<<(std::ostream &os, expression const &ex) {
     return ex.print(os);
   }
+  virtual std::ostream &print(std::ostream &) const = 0;
   virtual token_view getName() const noexcept = 0;
 };
 
