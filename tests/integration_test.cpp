@@ -1,6 +1,5 @@
 #include "backend_config.hpp"
 #include "lexer.hpp"
-#include "syntax_tree.hpp"
 
 #include <cstdlib>
 #include <filesystem>

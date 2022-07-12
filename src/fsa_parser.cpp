@@ -1,9 +1,3 @@
-#include "builtins.hpp"
-#include "container_types.hpp"
-#include "lexer.hpp"
-#include "literals.hpp"
-#include "syntax_tree.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -13,6 +7,15 @@
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
+
+#include "ast/control.hpp"
+#include "ast/expression_tree.hpp"
+#include "ast/functions.hpp"
+#include "ast/unevaluated_expression.hpp"
+#include "ast/variables.hpp"
+#include "builtins.hpp"
+#include "lexer.hpp"
+#include "literals.hpp"
 
 namespace {
 auto is_integer(selflang::token_view t) {
@@ -29,12 +32,12 @@ auto is_char(selflang::token_view t) {
   return std::pair{true, (unsigned char)t.at(1)};
 }
 
-std::pair<bool, selflang::string> is_str(selflang::token_view t) {
+std::pair<bool, std::string> is_str(selflang::token_view t) {
   if (t.front() != '\'' && t.front() != '\"')
     return {false, ""};
   if (!t.ends_with('\'') && !t.ends_with('\"'))
     return {false, ""};
-  auto literal = selflang::string(t);
+  auto literal = std::string(t);
   for (auto c = literal.begin(); c != literal.end(); ++c) {
     if (*c == '\\') {
       auto mark = c;
@@ -55,7 +58,7 @@ std::pair<bool, selflang::string> is_str(selflang::token_view t) {
       }
     }
   }
-  return {true, selflang::string(t.substr(1, t.length() - 2))};
+  return {true, std::string(t.substr(1, t.length() - 2))};
 }
 
 constexpr auto reserved_guard = [](auto t) {
@@ -67,15 +70,15 @@ struct global_parser {
   // syntax tree must be first because of initialization rules
   selflang::expression_tree syntax_tree;
   std::vector<selflang::expression_tree *> context_stack;
-  static inline selflang::string err_string;
+  static inline std::string err_string;
   // might want to make this a dictionary instead of a list. might scale better
   // for large type lists.
   selflang::type_list types;
-  selflang::vector<const selflang::expression *> symbols;
+  std::vector<const selflang::expression *> symbols;
   std::vector<selflang::expression_ptr> current;
   using self = global_parser;
   // todo: add proper compile error reporting later.
-  auto err_assert(bool condition, selflang::string_view message) {
+  auto err_assert(bool condition, std::string_view message) {
     if (!condition) {
       err_string = message;
       throw std::runtime_error(err_string);
@@ -83,7 +86,8 @@ struct global_parser {
   }
   selflang::expression_ptr evaluate_tree(selflang::expression_tree &uneval);
   void parse_symbol(auto &base) {
-    if (auto *maybe = dynamic_cast<selflang::maybe_expression *>(base.get());
+    if (auto *maybe =
+            dynamic_cast<selflang::unevaluated_expression *>(base.get());
         maybe && !maybe->is_complete()) {
       auto t = maybe->get_token();
       if (auto [is_int, number] = is_integer(t); is_int) {
@@ -93,7 +97,7 @@ struct global_parser {
         base = std::make_unique<selflang::char_literal>(c);
         return;
       } else if (auto [result, str] = is_str(t); result) {
-        selflang::vector<unsigned char> value;
+        std::vector<unsigned char> value;
         value.reserve(str.size());
         std::copy(str.begin(), str.end(), std::back_inserter(value));
         base = std::make_unique<selflang::string_literal>(value);
@@ -108,7 +112,7 @@ struct global_parser {
             return;
           } else if (hash == typeid(selflang::fun_def)) {
             base = std::make_unique<selflang::fun_call>(
-                reinterpret_cast<const selflang::fun_def &>(*symbol));
+                reinterpret_cast<const selflang::fun_def_base &>(*symbol));
             return;
           }
           err_assert(false, "conflicting symbols");
@@ -185,7 +189,8 @@ struct global_parser {
       } else {
         auto &curr_expr =
             dynamic_cast<selflang::expression_tree &>(*current.back());
-        curr_expr.push_back(std::make_unique<selflang::maybe_expression>(t));
+        curr_expr.push_back(
+            std::make_unique<selflang::unevaluated_expression>(t));
       }
       break;
     }
@@ -469,12 +474,12 @@ global_parser::evaluate_tree(selflang::expression_tree &tree) {
     if (auto *fun = reinterpret_cast<selflang::fun_call *>(it->get())) {
       ++it;
       if (auto *open_paren =
-              dynamic_cast<selflang::maybe_expression *>(it->get())) {
+              dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
         if (open_paren->get_token() == "(") {
           it = tree.erase(it);
           while (true) {
             auto *token_maybe =
-                dynamic_cast<selflang::maybe_expression *>(it->get());
+                dynamic_cast<selflang::unevaluated_expression *>(it->get());
             if (token_maybe) {
               if (token_maybe->get_token() == ")") {
                 if (arg.size() > 0)

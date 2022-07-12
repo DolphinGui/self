@@ -1,12 +1,11 @@
 #pragma once
 
-#include "container_types.hpp"
 #include "selfc.hpp"
 #include <initializer_list>
 
 namespace selflang {
-using token = string;
-using token_view = string_view;
+using token = std::string;
+using token_view = std::string_view;
 namespace reserved {
 inline constexpr token_view struct_t = "struct";
 inline constexpr token_view var_t = "var";

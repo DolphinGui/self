@@ -20,8 +20,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "ast/control.hpp"
+#include "ast/expression_tree.hpp"
+#include "ast/functions.hpp"
+#include "ast/literal.hpp"
+#include "ast/struct_def.hpp"
+#include "ast/variables.hpp"
 #include "builtins.hpp"
-#include "syntax_tree.hpp"
 
 namespace selflang {
 llvm::Type *getType(const var_decl &);
@@ -135,7 +140,7 @@ llvm::Value *dispatch(selflang::expression *expr, llvm::IRBuilder<> &builder) {
   }
 }
 
-void fun_gen(selflang::fun_def *fun, llvm::Module &module) {
+void fun_gen(selflang::fun_def_base *fun, llvm::Module &module) {
   std::vector<llvm::Type *> arg_types;
   arg_types.reserve(fun->arguments.size());
   std::transform(
@@ -160,7 +165,8 @@ void fun_gen(selflang::fun_def *fun, llvm::Module &module) {
 
 namespace selflang {
 std::unique_ptr<llvm::Module> codegen(const selflang::expression_tree &ast) {
-  auto module = std::make_unique<llvm::Module>("todo: make module name meaningful", context);
+  auto module = std::make_unique<llvm::Module>(
+      "todo: make module name meaningful", context);
   for (auto &expr : ast) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpotentially-evaluated-expression"

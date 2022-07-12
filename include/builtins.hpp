@@ -1,6 +1,9 @@
 #pragma once
-#include "syntax_tree.hpp"
+#include "ast/variables.hpp"
+#include "ast/functions.hpp"
+#include "ast/literal.hpp"
 #include <cstddef>
+#include <string_view>
 namespace selflang {
 namespace detail {
 constexpr auto ctr_lambda = [](auto in, int hash) {
@@ -20,7 +23,7 @@ const inline auto char_type = var_decl("char", type_type);
 const inline auto int_token_assignment = detail::ctr_lambda(
     operator_def(
         "=", int_type,
-        var_decl_ptr("this", type_ref{.ptr = int_type, .is_ptr = true}),
+        var_decl_ptr("this", type_ref{.ptr = int_type, .is_ref = true}),
         var_decl_ptr("RHS", int_type), true),
     detail::store);
 const inline auto internal_addi = detail::ctr_lambda(
@@ -44,9 +47,10 @@ const inline auto selfputchar =
 using int_literal = literal<size_t>;
 using char_literal = literal<unsigned char>;
 using double_literal = literal<double>;
-template <> struct literal<vector<unsigned char>> : public expression {
-  vector<unsigned char> value;
-  literal(vector<unsigned char> itself) : value(itself){};
+using token_view = std::string_view;
+template <> struct literal<std::vector<unsigned char>> : public expression {
+  std::vector<unsigned char> value;
+  literal(std::vector<unsigned char> itself) : value(itself){};
   inline std::ostream &print(std::ostream &out) const override {
     out << "literal: ";
     for (char c : value) {
@@ -59,6 +63,6 @@ template <> struct literal<vector<unsigned char>> : public expression {
   };
 };
 
-using string_literal = literal<vector<unsigned char>>;
+using string_literal = literal<std::vector<unsigned char>>;
 
 } // namespace selflang

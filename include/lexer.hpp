@@ -1,9 +1,9 @@
 #pragma once
-#include "syntax_tree.hpp"
+#include "ast/expression_tree.hpp"
 #include <istream>
 namespace selflang {
-using token_vec = vector<token>;
+using token_vec = std::vector<token>;
 using statement = token_vec;
-using statement_vec = vector<statement>;
-expression_tree lex(string in);
+using statement_vec = std::vector<statement>;
+expression_tree lex(std::string in);
 } // namespace cplang

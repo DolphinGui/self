@@ -1,8 +1,3 @@
-#include "lexer.hpp"
-#include "container_types.hpp"
-#include "fsa_parser.hpp"
-#include "literals.hpp"
-#include "syntax_tree.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cstddef>
@@ -14,10 +9,15 @@
 #include <system_error>
 #include <utility>
 
+#include "ast/expression_tree.hpp"
+#include "fsa_parser.hpp"
+#include "lexer.hpp"
+#include "literals.hpp"
+
 namespace {
 
 using namespace selflang;
-auto preprocess(string contents) {
+auto preprocess(std::string contents) {
   RE2::Replace(&contents, R"(\/\/.*?\n)", " ");
   RE2::Replace(&contents, R"(\/\*[\S\s]*?\*\/)", " ");
   RE2::Replace(&contents, "\n", ";");
@@ -25,23 +25,21 @@ auto preprocess(string contents) {
   return contents;
 }
 
-auto token_parse(string whole) {
+auto token_parse(std::string whole) {
   re2::StringPiece input(whole);
   token cur_token;
   token_vec token_list;
   while (RE2::FindAndConsume(
-      &input,
-      R"(((?:->)|\(|\)|{|}|\[|\]|(?:'.+')|(?:".+")|;|,|<|>|:|[^<>\s(){};,\[\]'":]+))",
+      &input, R"(((?:->|'.+'|".+")|[(){}[\];,<>:]|[^<>\s(){};,[\]'":]+))",
       &cur_token)) {
     token_list.push_back(cur_token);
   }
   return token_list;
 }
 
-
 } // namespace
 namespace selflang {
-expression_tree lex(string in) {
+expression_tree lex(std::string in) {
   return parse(token_parse(preprocess(in)));
   using namespace std::literals;
 }
