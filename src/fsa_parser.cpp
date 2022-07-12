@@ -9,6 +9,7 @@
 #include <tuple>
 
 #include "ast/control.hpp"
+#include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 #include "ast/functions.hpp"
 #include "ast/unevaluated_expression.hpp"
@@ -58,7 +59,7 @@ std::pair<bool, std::string> is_str(selflang::token_view t) {
       }
     }
   }
-  return {true, std::string(t.substr(1, t.length() - 2))};
+  return {true, std::string(literal.substr(1, literal.length() - 2))};
 }
 
 constexpr auto reserved_guard = [](auto t) {
@@ -112,7 +113,7 @@ struct global_parser {
             return;
           } else if (hash == typeid(selflang::fun_def)) {
             base = std::make_unique<selflang::fun_call>(
-                reinterpret_cast<const selflang::fun_def_base &>(*symbol));
+                reinterpret_cast<const selflang::fun_def &>(*symbol));
             return;
           }
           err_assert(false, "conflicting symbols");
@@ -135,6 +136,7 @@ struct global_parser {
   enum struct exec_states { start, init, var, expr, ret };
   enum struct var_states { init, named, semicolon, type_annotated, expr };
   enum struct expr_states { init, processing };
+  enum struct struct_states { init, var, fun };
   enum struct fun_states {
     init,
     named,
@@ -227,13 +229,11 @@ struct global_parser {
       break;
     case semicolon:
       if (reserved_guard(t)) {
-        for (auto a : types) {
-          if (a->getName() == t) {
-            reinterpret_cast<selflang::var_decl &>(*current.back()).type.ptr =
-                a;
-            break;
-          }
-        }
+        // TODO: deal with multiple candidates
+        auto candidates = types.find(t);
+        err_assert(candidates != types.end(), "type not found");
+        reinterpret_cast<selflang::var_decl &>(*current.back()).type.ptr =
+            candidates->second;
         var_state = type_annotated;
       }
       break;
@@ -256,20 +256,22 @@ struct global_parser {
     else
       fun_ptr = nullptr;
     switch (fun_state) {
-    case init:
+    case init: {
       if (reserved_guard(t)) {
         current.push_back(std::make_unique<selflang::fun_def>(t));
         fun_state = named;
       } else
         err_assert(false, "token is reserved");
       break;
-    case named:
+    }
+    case named: {
       if (t == "(") {
         fun_state = arg_start;
       } else
         err_assert(false, "\"(\" expected");
       break;
-    case arg_start:
+    }
+    case arg_start: {
       if (t == ")") {
         fun_state = args_specified;
       } else if (reserved_guard(t)) {
@@ -279,24 +281,22 @@ struct global_parser {
       } else
         err_assert(false, "argument or \")\" expected");
       break;
-    case arg_named:
+    }
+    case arg_named: {
       if (t == ":") {
         fun_state = arg_colon;
       } else
         err_assert(false, "\":\" expected");
       break;
-    case arg_colon:
-      for (auto &type : types) {
-        if (type->getName() == t) {
-          fun_ptr->arguments.back()->type.ptr = type;
-          goto type_found;
-        }
-      }
-      err_assert(false, "no types found");
-    type_found:
+    }
+    case arg_colon: {
+      auto candidates = types.find(t);
+      err_assert(candidates != types.end(), "no types found");
+      fun_ptr->arguments.back()->type.ptr = candidates->second;
       fun_state = arg_finished;
       break;
-    case arg_finished:
+    }
+    case arg_finished: {
       if (t == ")") {
         fun_state = args_specified;
       } else if (t == ",") {
@@ -305,7 +305,8 @@ struct global_parser {
         err_assert(false, "unknown token");
       }
       break;
-    case args_specified:
+    }
+    case args_specified: {
       if (t == "->") {
         fun_state = arrow;
       } else if (t == "{") {
@@ -314,18 +315,15 @@ struct global_parser {
         err_assert(false, "\"{\" or \"->\" expected.");
       }
       break;
-    case arrow:
-      for (auto &type : types) {
-        if (type->getName() == t) {
-          fun_ptr->return_type = type;
-          goto return_type_found;
-        }
-      }
-      err_assert(false, "no types found");
-    return_type_found:
+    }
+    case arrow: {
+      auto candidates = types.find(t);
+      err_assert(candidates != types.end(), "type not found");
+      fun_ptr->return_type = candidates->second;
       fun_state = forwarded;
       break;
-    case forwarded:
+    }
+    case forwarded: {
       fun_ptr->body_defined = false;
       if (t == "{") {
         fun_state = parsing;
@@ -339,7 +337,8 @@ struct global_parser {
         err_assert(false, "\"{\" or \"->\" expected.");
       }
       break;
-    case declared:
+    }
+    case declared: {
       if (t == "{")
         fun_state = parsing;
       else if (t == selflang::reserved::endl) {
@@ -350,14 +349,16 @@ struct global_parser {
       } else
         err_assert(false, "\"{\" expected.");
       break;
+    }
     case parsing: {
       using enum exec_states;
       using namespace selflang::reserved;
       switch (fun_inner_state) {
-      case start:
+      case start: {
         context_stack.push_back(&fun_ptr->body);
         fun_inner_state = init;
-      case init:
+      }
+      case init: {
         if (t == var_t) {
           fun_inner_state = var;
           break;
@@ -380,16 +381,19 @@ struct global_parser {
         } else {
           err_assert(false, "Unexpected token");
         }
-      case expr:
+      }
+      case expr: {
         if (expr_parse(t)) {
           fun_inner_state = init;
         }
         break;
-      case var:
+      }
+      case var: {
         if (var_parse(t))
           fun_inner_state = init;
         break;
-      case ret:
+      }
+      case ret: {
         const auto insert = [this] {
           auto expr = std::move(current.back());
           current.pop_back();
@@ -408,10 +412,14 @@ struct global_parser {
         }
         break;
       }
-    } break;
+      }
+      break;
+    }
     }
     return false;
   }
+
+  bool struct_parse(selflang::token_view t) {}
 
   void process(selflang::token_view t) {
     using enum decl_states;
@@ -448,11 +456,11 @@ struct global_parser {
   }
 
   global_parser() {
-    types.push_back(&selflang::void_type);
-    types.push_back(&selflang::byte_type);
-    types.push_back(&selflang::type_var);
-    types.push_back(&selflang::int_type);
-    types.push_back(&selflang::char_type);
+    types.insert({selflang::void_type.getName(), &selflang::void_type});
+    types.insert({selflang::byte_type.getName(), &selflang::byte_type});
+    types.insert({selflang::type_type.getName(), &selflang::type_type});
+    types.insert({selflang::int_type.getName(), &selflang::int_type});
+    types.insert({selflang::char_type.getName(), &selflang::char_type});
     symbols.push_back(&selflang::int_token_assignment);
     symbols.push_back(&selflang::internal_addi);
     symbols.push_back(&selflang::internal_subi);
@@ -461,18 +469,55 @@ struct global_parser {
     context_stack.push_back(&syntax_tree);
   }
 };
+static void subtree_pass(selflang::expression_tree &tree, auto begin,
+                         auto end) {
+  for (auto open = begin; open != end; ++open) {
+    if (auto *open_paren =
+            dynamic_cast<selflang::unevaluated_expression *>(open->get());
+        open_paren && open_paren->get_token() == "(") {
+      for (auto close = 1 + open; close != end; ++close) {
+        if (auto *close_paren =
+                dynamic_cast<selflang::unevaluated_expression *>(
+                    close->get())) {
+          if (close_paren->get_token() == "(") {
+            subtree_pass(tree, close, end);
+          } else if (close_paren->get_token() == ")") {
+            auto subtree = std::make_unique<selflang::expression_tree>();
+            subtree->reserve(std::distance(open + 1, close));
+            std::transform(open + 1, close, std::back_inserter(*subtree),
+                           [](selflang::expression_ptr &e) {
+                             return selflang::expression_ptr(std::move(e));
+                           });
+            tree.erase(open, close + 1);
+            tree.insert(open, std::move(subtree));
+          }
+        }
+      }
+    }
+  }
+}
+static void subtree_pass(selflang::expression_tree &tree) {
+  return subtree_pass(tree, tree.begin(), tree.end());
+}
 selflang::expression_ptr
 global_parser::evaluate_tree(selflang::expression_tree &tree) {
+  subtree_pass(tree);
   for (auto &ptr : tree) {
     parse_symbol(ptr);
   }
 
+  auto a = tree.dump();
+  auto b = tree.nullcheck();
+
   // ok not sure why the end check doesn't work but I have to check
   // if the tree is size 1
-  for (auto it = tree.begin(); it != tree.end() && tree.size() != 1; ++it) {
+  for (auto it = tree.begin(); it != tree.end(); ++it) {
     selflang::expression_tree arg;
-    if (auto *fun = reinterpret_cast<selflang::fun_call *>(it->get())) {
+    if (auto *fun = dynamic_cast<selflang::fun_call *>(it->get())) {
       ++it;
+      if (tree.end() == it) {
+        break;
+      }
       if (auto *open_paren =
               dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
         if (open_paren->get_token() == "(") {

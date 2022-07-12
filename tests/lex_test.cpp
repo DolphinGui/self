@@ -5,13 +5,13 @@
 
 #include "lexer.hpp"
 
-constexpr std::string_view var_decl_test = "var a: byte\nvar b: void";
+constexpr std::string_view var_decl_test = "var a: byte";
 constexpr std::string_view expr_test = "var a = 1 + (2 - 5 / 3) * 2";
 constexpr std::string_view fun_def_test = "\
 fun main()->int{return 0;}";
 int main() {
   uint count = 0;
-  for (const auto &file : {fun_def_test}) {
+  for (const auto &file : {expr_test}) {
     fmt::print("Test {}:\n", count++);
     auto results = selflang::lex(std::string(file));
     for (auto &ex : results) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast/expression.hpp"
+#include <unordered_map>
 
 namespace selflang {
 class var_decl;
@@ -38,7 +39,7 @@ public:
 std::unique_ptr<var_decl> var_decl_ptr(auto &&...args) {
   return std::make_unique<var_decl>(std::forward<decltype(args)>(args)...);
 }
-using type_list = std::vector<const var_decl *>;
+using type_list = std::unordered_multimap<std::string_view, const var_decl *>;
 
 class var_ref : public expression {
   const var_decl &name;

@@ -1,7 +1,8 @@
 #pragma once
-#include "ast/variables.hpp"
 #include "ast/functions.hpp"
 #include "ast/literal.hpp"
+#include "ast/struct_def.hpp"
+#include "ast/variables.hpp"
 #include <cstddef>
 #include <string_view>
 namespace selflang {
@@ -12,12 +13,18 @@ constexpr auto ctr_lambda = [](auto in, int hash) {
 };
 enum hash_value { none = 0, store, addi, subi, muli, divi };
 } // namespace detail
-const inline auto type_type = var_decl("type");
-const inline auto void_type = var_decl("void", type_type);
-const inline auto byte_type = var_decl("byte", type_type);
-const inline auto type_var = var_decl("type", type_type);
-const inline auto int_type = var_decl("int", type_type);
-const inline auto char_type = var_decl("char", type_type);
+const inline auto type_type = [] {
+  auto type = builtin_type("type");
+  // the type of type is type.
+  type.register_type({type}, typeid(struct_def));
+  return type;
+}();
+const inline auto void_type = builtin_type("void", {type_type}, typeid(void));
+const inline auto byte_type =
+    builtin_type("byte", {type_type}, typeid(std::byte));
+const inline auto int_type = builtin_type("int", {type_type}, typeid(size_t));
+const inline auto char_type =
+    builtin_type("char", {type_type}, typeid(unsigned char));
 // const inline auto bool_type = var_decl("bool");
 // might remove these later
 const inline auto int_token_assignment = detail::ctr_lambda(
