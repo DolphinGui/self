@@ -20,13 +20,6 @@ struct expression_tree : public expression, public expression_list {
     print(result);
     return result.str();
   }
-  bool nullcheck() {
-    for (const auto &e : *this) {
-      if (!e)
-        return true;
-    }
-    return false;
-  }
 
   virtual token_view getName() const noexcept override {
     return "expression tree";

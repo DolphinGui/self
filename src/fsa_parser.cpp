@@ -14,6 +14,7 @@
 #include "ast/expression_tree.hpp"
 #include "ast/functions.hpp"
 #include "ast/struct_def.hpp"
+#include "ast/tuple.hpp"
 #include "ast/unevaluated_expression.hpp"
 #include "ast/variables.hpp"
 #include "builtins.hpp"
@@ -84,6 +85,7 @@ template <typename T> struct token_it_t {
     this->operator++();
     return tmp;
   }
+  bool end() const noexcept { return pos == where.size(); }
 };
 using token_it = token_it_t<std::vector<selflang::token>>;
 
@@ -92,7 +94,9 @@ struct global_parser {
   // might want to make this a dictionary instead of a list. might scale better
   // for large type lists.
   selflang::type_list types;
-  std::vector<const selflang::expression *> symbols;
+  using symbol_map = std::unordered_multimap<selflang::token_view,
+                                             const selflang::expression *>;
+  symbol_map symbols;
   using self = global_parser;
   // todo: add proper compile error reporting later.
   auto err_assert(bool condition, std::string_view message) {
@@ -101,46 +105,176 @@ struct global_parser {
       throw std::runtime_error(err_string);
     }
   }
-  selflang::expression_ptr evaluate_tree(selflang::expression_tree &uneval);
-  void parse_symbol(auto &base) {
+
+  static void subtree_pass(selflang::expression_tree &tree, auto begin,
+                           auto end) {
+    for (auto open = begin; open != end; ++open) {
+      if (auto *open_paren =
+              dynamic_cast<selflang::unevaluated_expression *>(open->get());
+          open_paren && open_paren->get_token() == "(") {
+        for (auto close = 1 + open; close != end; ++close) {
+          if (auto *close_paren =
+                  dynamic_cast<selflang::unevaluated_expression *>(
+                      close->get())) {
+            if (close_paren->get_token() == "(") {
+              subtree_pass(tree, close, end);
+            } else if (close_paren->get_token() == ")") {
+              auto subtree = std::make_unique<selflang::expression_tree>();
+              subtree->reserve(std::distance(open + 1, close));
+              std::for_each(open + 1, close, [&](selflang::expression_ptr &e) {
+                subtree->emplace_back(std::move(e));
+              });
+              tree.erase(open, close + 1);
+              tree.insert(open, std::move(subtree));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  static void subtree_pass(selflang::expression_tree &tree) {
+    return subtree_pass(tree, tree.begin(), tree.end());
+  }
+  void tuple_pass(selflang::expression_tree &tree) {
+    size_t size = 0;
+    auto tuple = std::make_unique<selflang::tuple>();
+    auto mark = tree.begin();
+    for (auto it = tree.begin(); it != tree.end(); ++it, ++size) {
+      if (auto *comma =
+              dynamic_cast<selflang::unevaluated_expression *>(it->get());
+          comma && comma->get_token() == ",") {
+        selflang::expression_tree branch;
+        branch.reserve(size);
+        std::for_each(mark, it, [&](selflang::expression_ptr &ptr) {
+          branch.push_back(std::move(ptr));
+        });
+        mark = it = tree.erase(mark, it + 1);
+        if (branch.size() > 1) {
+          tuple->members.emplace_back(evaluate_tree(branch));
+        } else {
+          tuple->members.emplace_back(parse_symbol(branch.back()));
+        }
+        size = 0;
+      }
+    }
+    if (!tuple->members.empty()) {
+      if (tree.size() > 1) {
+        tuple->members.emplace_back(evaluate_tree(tree));
+      } else {
+        tuple->members.emplace_back(parse_symbol(tree.back()));
+        tree.pop_back();
+      }
+      tuple->members.shrink_to_fit();
+      tree.push_back(std::move(tuple));
+    }
+  }
+
+  selflang::expression_ptr evaluate_tree(selflang::expression_tree &tree) {
+    if (tree.empty()) {
+      return std::make_unique<selflang::tuple>();
+    }
+    subtree_pass(tree);
+    for (auto &ptr : tree) {
+      if (auto *uneval = dynamic_cast<selflang::expression_tree *>(ptr.get())) {
+        ptr = evaluate_tree(*uneval);
+      }
+    }
+    tuple_pass(tree);
+    for (auto &ptr : tree) {
+      ptr = parse_symbol(ptr);
+    }
+
+    // ok not sure why the end check doesn't work but I have to check
+    // if the tree is size 1
+    for (auto it = tree.begin(); it != tree.end(); ++it) {
+      selflang::expression_tree arg;
+      if (auto *fun = dynamic_cast<selflang::fun_call *>(it->get())) {
+        ++it;
+        if (tree.end() == it) {
+          break;
+        }
+        if (auto *tuple = dynamic_cast<selflang::tuple *>(it->get())) {
+          err_assert(tuple->members.size() == fun->definition.arguments.size(),
+                     "argument number mismatch");
+          // TODO: check types
+          std::for_each(tuple->members.begin(), tuple->members.end(),
+                        [&](selflang::expression_ptr &ptr) {
+                          fun->args.emplace_back(std::move(ptr));
+                        });
+          it = --tree.erase(it);
+        } else {
+          fun->args.emplace_back(std::move(*it));
+          it = --tree.erase(it);
+        }
+      }
+    }
+
+    auto a = tree.dump();
+    // left-right associative pass
+    for (auto it = tree.begin(); it != tree.end(); ++it) {
+      if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
+          op && !op->get_def().is_member() && op->args.empty()) {
+        auto lhs = it, rhs = it;
+        --lhs, ++rhs;
+        auto left = selflang::expression_ptr(lhs->release()),
+             right = selflang::expression_ptr(rhs->release());
+        tree.erase(rhs), it = tree.erase(lhs);
+        op->add_arg(std::move(left));
+        op->add_arg(std::move(right));
+      }
+    }
+    // right-left associative pass
+    for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
+      if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
+          op && op->get_def().is_member() && op->args.empty()) {
+        auto lhs = it, rhs = it;
+        ++lhs, --rhs;
+        auto left = selflang::expression_ptr(lhs->release()),
+             right = selflang::expression_ptr(rhs->release());
+        op->add_arg(std::move(left));
+        op->add_arg(std::move(right));
+        tree.erase(rhs.base());
+        it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
+      }
+    }
+
+    err_assert(tree.size() == 1, "tree is not fully resolved");
+    auto last = selflang::expression_ptr(std::move(tree.back()));
+    tree.pop_back();
+    return last;
+  }
+
+  selflang::expression_ptr parse_symbol(auto &base) {
     if (auto *maybe =
             dynamic_cast<selflang::unevaluated_expression *>(base.get());
         maybe && !maybe->is_complete()) {
       auto t = maybe->get_token();
       if (auto [is_int, number] = is_integer(t); is_int) {
-        base = std::make_unique<selflang::int_literal>(number);
-        return;
+        return std::make_unique<selflang::int_literal>(number);
+
       } else if (auto [result, c] = is_char(t); result) {
-        base = std::make_unique<selflang::char_literal>(c);
-        return;
+        return std::make_unique<selflang::char_literal>(c);
+
       } else if (auto [result, str] = is_str(t); result) {
         std::vector<unsigned char> value;
-        value.reserve(str.size());
-        std::copy(str.begin(), str.end(), std::back_inserter(value));
-        base = std::make_unique<selflang::string_literal>(value);
-        return;
+        value.reserve(str.size() - 1);
+        std::copy(str.begin(), str.end() - 1, std::back_inserter(value));
+        return std::make_unique<selflang::string_literal>(value);
       }
-      for (auto symbol : symbols) {
-        if (symbol->getName() == maybe->get_token()) {
-          if (auto &hash = typeid(*symbol);
-              hash == typeid(selflang::operator_def)) {
-            base = std::make_unique<selflang::op_call>(
-                reinterpret_cast<const selflang::operator_def &>(*symbol));
-            return;
-          } else if (hash == typeid(selflang::fun_def)) {
-            base = std::make_unique<selflang::fun_call>(
-                reinterpret_cast<const selflang::fun_def &>(*symbol));
-            return;
-          }
-          err_assert(false, "conflicting symbols");
-        }
+      auto symbol = symbols.find(maybe->get_token());
+      err_assert(symbol != symbols.end(), "Symbol not found");
+      if (auto *op =
+              dynamic_cast<const selflang::operator_def *>(symbol->second)) {
+        return std::make_unique<selflang::op_call>(*op);
+
+      } else if (auto *fun =
+                     dynamic_cast<const selflang::fun_def *>(symbol->second)) {
+        return std::make_unique<selflang::fun_call>(*fun);
       }
-    } else if (auto *uneval =
-                   dynamic_cast<selflang::expression_tree *>(base.get());
-               uneval) {
-      base = evaluate_tree(*uneval);
-      return;
+      err_assert(false, "conflicting symbols");
     }
+    return std::move(base);
   }
   using callback = std::function<void(selflang::expression_tree &)>;
 
@@ -184,10 +318,8 @@ struct global_parser {
     }
   }
 
-  selflang::expression_ptr fun_parse(token_it &t) {
-    err_assert(reserved_guard(*t),
-               "reserved token cannot be used as function name");
-    auto curr = std::make_unique<selflang::fun_def>(*t++);
+  selflang::expression_ptr fun_parse(token_it &t, selflang::token_view name) {
+    auto curr = std::make_unique<selflang::fun_def>(name);
     err_assert(*t++ == "(", "\"(\" expected");
     while (*t != ")") {
       err_assert(reserved_guard(*t),
@@ -195,12 +327,16 @@ struct global_parser {
       curr->arguments.emplace_back(std::make_unique<selflang::var_decl>(*t++));
       err_assert(*t++ == ":", "\":\" expected here");
       // todo make this an expression instead of hardcoded
-      auto candidates = types.find(*t);
+      auto candidates = types.find(*t++);
       err_assert(candidates != types.end(), "no types found");
       curr->arguments.back()->type.ptr = candidates->second;
       err_assert(*t == ")" || *t == ",", "\")\" or \",\" expected");
+      if (*t == ")")
+        break;
+      else
+        ++t;
     }
-    if (*t == "->") {
+    if (*++t == "->") {
       ++t;
       auto candidates = types.find(*t++);
       err_assert(candidates != types.end(), "type not found");
@@ -216,26 +352,63 @@ struct global_parser {
           if (*t != endl) {
             curr->body.push_back(
                 std::make_unique<selflang::ret>(expr_parse(t)));
+          } else {
+            curr->body.push_back(std::make_unique<selflang::ret>());
           }
-          curr->body.push_back(std::make_unique<selflang::ret>());
         } else if (reserved_guard(*t)) {
           curr->body.push_back(expr_parse(t));
         }
       }
+      curr->body_defined = true;
     }
+    ++t;
+    symbols.insert({curr->name, curr.get()});
     return curr;
   }
 
-  selflang::expression_tree process(token_it t) {
+  selflang::expression_ptr struct_parse(token_it &t) {
+    err_assert(*t == "{" || *t == "(", "Expected a \"{\" or \"(\"");
+    if (*t == "(") {
+      ++t;
+      if (*t == ")") {
+        return std::make_unique<selflang::opaque_struct>();
+      } else {
+        auto [success, size] = is_integer(*t);
+        err_assert(success, "Expected integer or \")\"");
+        return std::make_unique<selflang::opaque_struct>(size);
+      }
+    } else {
+      auto result = std::make_unique<selflang::struct_def>();
+      while (*t != "}") {
+        if (*(++t) == "var") {
+          result->body.push_back(var_parse(t));
+        } else if (*t == "fun") {
+          auto name = *++t;
+          err_assert(reserved_guard(name), "function name is reserved");
+          result->body.push_back(fun_parse(t, name));
+        } else {
+          err_assert(false, "expected a function or variable declaration.");
+        }
+      }
+      return result;
+    }
+  }
 
+  selflang::expression_tree process(token_it t) {
     selflang::expression_tree syntax_tree;
     using namespace selflang::reserved;
-    if (*t == var_t) {
-      syntax_tree.emplace_back(var_parse(++t));
-    } else if (*t == fun_t) {
-      syntax_tree.emplace_back(fun_parse(++t));
-    } else if (reserved_guard(*t)) {
-      syntax_tree.emplace_back(expr_parse(t));
+    while (!t.end()) {
+      if (*t == var_t) {
+        syntax_tree.emplace_back(var_parse(++t));
+      } else if (*t == fun_t) {
+        auto name = *++t;
+        err_assert(reserved_guard(name), "function name is reserved");
+        syntax_tree.emplace_back(fun_parse(++t, name));
+      } else if (reserved_guard(*t)) {
+        syntax_tree.emplace_back(expr_parse(t));
+      } else {
+        err_assert(*t++ == endl, "invalid expression");
+      }
     }
     return syntax_tree;
   }
@@ -246,130 +419,23 @@ struct global_parser {
     types.insert({selflang::type_type.getName(), &selflang::type_type});
     types.insert({selflang::int_type.getName(), &selflang::int_type});
     types.insert({selflang::char_type.getName(), &selflang::char_type});
-    symbols.push_back(&selflang::int_token_assignment);
-    symbols.push_back(&selflang::internal_addi);
-    symbols.push_back(&selflang::internal_subi);
-    symbols.push_back(&selflang::internal_muli);
-    symbols.push_back(&selflang::internal_divi);
+    symbols.insert({selflang::int_token_assignment.getName(),
+                    &selflang::int_token_assignment});
+    symbols.insert(
+        {selflang::internal_addi.getName(), &selflang::internal_addi});
+    symbols.insert(
+        {selflang::internal_subi.getName(), &selflang::internal_subi});
+    symbols.insert(
+        {selflang::internal_muli.getName(), &selflang::internal_muli});
+    symbols.insert(
+        {selflang::internal_divi.getName(), &selflang::internal_divi});
   }
 };
-static void subtree_pass(selflang::expression_tree &tree, auto begin,
-                         auto end) {
-  for (auto open = begin; open != end; ++open) {
-    if (auto *open_paren =
-            dynamic_cast<selflang::unevaluated_expression *>(open->get());
-        open_paren && open_paren->get_token() == "(") {
-      for (auto close = 1 + open; close != end; ++close) {
-        if (auto *close_paren =
-                dynamic_cast<selflang::unevaluated_expression *>(
-                    close->get())) {
-          if (close_paren->get_token() == "(") {
-            subtree_pass(tree, close, end);
-          } else if (close_paren->get_token() == ")") {
-            auto subtree = std::make_unique<selflang::expression_tree>();
-            subtree->reserve(std::distance(open + 1, close));
-            std::transform(open + 1, close, std::back_inserter(*subtree),
-                           [](selflang::expression_ptr &e) {
-                             return selflang::expression_ptr(std::move(e));
-                           });
-            tree.erase(open, close + 1);
-            tree.insert(open, std::move(subtree));
-          }
-        }
-      }
-    }
-  }
-  if (tree.nullcheck()) {
-    throw std::runtime_error("nullcheck failed");
-  }
-}
-static void subtree_pass(selflang::expression_tree &tree) {
-  return subtree_pass(tree, tree.begin(), tree.end());
-}
-selflang::expression_ptr
-global_parser::evaluate_tree(selflang::expression_tree &tree) {
-  subtree_pass(tree);
-  for (auto &ptr : tree) {
-    parse_symbol(ptr);
-  }
-
-  // ok not sure why the end check doesn't work but I have to check
-  // if the tree is size 1
-  for (auto it = tree.begin(); it != tree.end(); ++it) {
-    selflang::expression_tree arg;
-    if (auto *fun = dynamic_cast<selflang::fun_call *>(it->get())) {
-      ++it;
-      if (tree.end() == it) {
-        break;
-      }
-      if (auto *open_paren =
-              dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
-        if (open_paren->get_token() == "(") {
-          it = tree.erase(it);
-          while (true) {
-            auto *token_maybe =
-                dynamic_cast<selflang::unevaluated_expression *>(it->get());
-            if (token_maybe) {
-              if (token_maybe->get_token() == ")") {
-                if (arg.size() > 0)
-                  fun->args.emplace_back(evaluate_tree(arg));
-                it = --tree.erase(it);
-                break;
-              } else if (token_maybe->get_token() == ",") {
-                fun->args.emplace_back(evaluate_tree(arg));
-                it = --tree.erase(it);
-              }
-            } else {
-              arg.push_back(std::move(*it));
-              it = --tree.erase(it);
-            }
-            ++it;
-          }
-        }
-      }
-    }
-  }
-
-  auto a = tree.dump();
-  // left-right associative pass
-  for (auto it = tree.begin(); it != tree.end(); ++it) {
-    if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
-        op && !op->get_def().is_member() && op->args.empty()) {
-      auto lhs = it, rhs = it;
-      --lhs, ++rhs;
-      auto left = selflang::expression_ptr(lhs->release()),
-           right = selflang::expression_ptr(rhs->release());
-      tree.erase(rhs), it = tree.erase(lhs);
-      op->add_arg(std::move(left));
-      op->add_arg(std::move(right));
-    }
-  }
-  // right-left associative pass
-  for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
-    if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
-        op && op->get_def().is_member() && op->args.empty()) {
-      auto lhs = it, rhs = it;
-      ++lhs, --rhs;
-      auto left = selflang::expression_ptr(lhs->release()),
-           right = selflang::expression_ptr(rhs->release());
-      op->add_arg(std::move(left));
-      op->add_arg(std::move(right));
-      tree.erase(rhs.base());
-      it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
-    }
-  }
-
-  err_assert(tree.size() == 1, "tree is not fully resolved");
-  auto last = selflang::expression_ptr(tree.front().release());
-  tree.pop_back();
-  return last;
-}
 } // namespace
 
 namespace selflang {
 expression_tree parse(token_vec in) {
   global_parser parser;
-  auto result = parser.process(token_it{in});
-  return result;
+  return parser.process(token_it{in});
 }
 } // namespace selflang

@@ -9,3 +9,4 @@ typedef struct str_view_t str_view;
 int selfputchar(unsigned char c);
 int selfputcharerr(unsigned char c);
 int selfprint(str_view s);
+int printmulti(unsigned char c, int n);

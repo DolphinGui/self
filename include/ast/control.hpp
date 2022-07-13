@@ -7,7 +7,8 @@ struct ret : public expression {
   ret() = default;
   virtual token_view getName() const noexcept override { return "return"; }
   inline std::ostream &print(std::ostream &out) const override {
-    out << "returns " << *value;
+    if (value)
+      out << "returns " << *value;
     return out;
   }
   bool is_complete() const noexcept override { return !value; }

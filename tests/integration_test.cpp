@@ -15,6 +15,7 @@
 constexpr auto file = R"(
 fun selfputchar(c: char)->int;
 fun selfflush()->void;
+fun printmulti(c: char, i: int)->int;
 fun main()->int{
   "this is a string\n";
   selfputchar('h');
@@ -28,7 +29,7 @@ fun main()->int{
   selfputchar('r');
   selfputchar('l');
   selfputchar('d');
-  selfputchar('!');
+  printmulti('!', 3);
   selfflush();
   return 0;
 }

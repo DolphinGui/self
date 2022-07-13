@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -21,6 +22,7 @@ struct struct_def : public expression {
   token_view getName() const noexcept override { return "struct decl"; };
 };
 struct opaque_struct : public expression {
+  opaque_struct(size_t size = 0) : size(size) {}
   size_t size = 0;
   std::ostream &print(std::ostream &out) const override {
     out << "opaque struct" << size;

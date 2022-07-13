@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <iterator>
@@ -33,7 +35,6 @@ llvm::Type *getType(const var_decl &);
 }
 namespace {
 llvm::LLVMContext context;
-
 llvm::Value *dispatch(selflang::expression *expr, llvm::IRBuilder<> &builder);
 llvm::Value *call_gen(selflang::fun_call_base &base,
                       llvm::IRBuilder<> &builder) {
@@ -93,18 +94,26 @@ llvm::Value *fun_call_gen(selflang::fun_call_base &fun,
 }
 
 llvm::Value *create_string(selflang::string_literal &str, llvm::Module &m) {
-  auto type =
+
+  auto arr_type =
       llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
   std::vector<llvm::Constant *> constants;
   constants.reserve(str.value.size());
-  std::transform(str.value.begin(), str.value.end(),
-                 std::back_inserter(constants), [&](unsigned char c) {
-                   return llvm::ConstantInt::get(llvm::Type::getInt8Ty(context),
-                                                 c);
-                 });
-  auto init = llvm::ConstantArray::get(type, constants);
+  std::for_each(str.value.begin(), str.value.end(), [&](unsigned char c) {
+    constants.push_back(
+        llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), c));
+  });
+  std::array<llvm::Constant *, 2> consts;
+  consts[0] =
+      llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), str.value.size());
+  consts[1] = llvm::ConstantArray::get(arr_type, constants);
+  auto type = llvm::StructType::get(
+      llvm::Type::getInt64Ty(context),
+      llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size()));
+
+  auto constant = llvm::ConstantStruct::get(type, consts);
   auto global = new llvm::GlobalVariable(
-      m, type, true, llvm::GlobalVariable::ExternalLinkage, init);
+      m, type, true, llvm::GlobalVariable::ExternalLinkage, constant);
   global->setAlignment(llvm::Align(1));
   global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
   return global;
@@ -167,14 +176,15 @@ namespace selflang {
 std::unique_ptr<llvm::Module> codegen(const selflang::expression_tree &ast) {
   auto module = std::make_unique<llvm::Module>(
       "todo: make module name meaningful", context);
-  for (auto &expr : ast) {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpotentially-evaluated-expression"
-
-    if (auto &type = typeid(*expr); type == typeid(selflang::fun_def)) {
-
-#pragma GCC diagnostic pop
-      fun_gen(dynamic_cast<selflang::fun_def *>(expr.get()), *module);
+  for (auto &expr : ast) { // clang-format off
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
+    // clang-format on
+    if (auto *fun_def = dynamic_cast<selflang::fun_def_base *>(
+            expr.get())) { // clang-format off
+    #pragma clang diagnostic pop
+      // clang-format on
+      fun_gen(fun_def, *module);
     } else {
       throw std::runtime_error("unimplemented");
     }
