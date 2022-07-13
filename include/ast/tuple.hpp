@@ -19,4 +19,8 @@ struct tuple : public expression {
   }
   token_view getName() const noexcept override { return "tuple"; };
 };
+struct arg_pack: public tuple{
+  arg_pack() = default;
+  arg_pack(tuple&& other):tuple(std::move(other)){}
+};
 } // namespace selflang

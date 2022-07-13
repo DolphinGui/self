@@ -27,7 +27,7 @@ struct builtin_type : public var_decl {
 
 template <typename T> struct literal : public expression {
   T value;
-  var_ref type;
+  type_ref type;
   inline std::ostream &print(std::ostream &out) const override {
     return out << "literal: " << value;
   }
@@ -38,8 +38,11 @@ template <typename T> struct literal : public expression {
       : literal(value,
                 {detail::global_typeid_builtin_map.at(typeid(T).hash_code())}) {
   }
+  type_ptr getType() const noexcept override {
+    return {&type.ptr, ref_types::value};
+  }
 
 private:
-  literal(T itself, var_ref type) : value(itself), type(type){};
+  literal(T itself, var_ref type) : value(itself), type{type} {};
 };
 } // namespace selflang

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -20,6 +21,7 @@
 #include "builtins.hpp"
 #include "lexer.hpp"
 #include "literals.hpp"
+#include "pair_range.hpp"
 
 namespace {
 auto is_integer(selflang::token_view t) {
@@ -95,7 +97,7 @@ struct global_parser {
   // for large type lists.
   selflang::type_list types;
   using symbol_map = std::unordered_multimap<selflang::token_view,
-                                             const selflang::expression *>;
+                                             selflang::expression_const_ref>;
   symbol_map symbols;
   using self = global_parser;
   // todo: add proper compile error reporting later.
@@ -170,6 +172,51 @@ struct global_parser {
     }
   }
 
+  bool type_coerce(selflang::expression *e, selflang::type_ptr type) {
+    if (auto *var = dynamic_cast<selflang::var_decl *>(e)) {
+      if (!var->type.ptr) {
+        var->type = type;
+        return true;
+      }
+    } else if (auto *uneval =
+                   dynamic_cast<selflang::unevaluated_expression *>(e)) {
+      uneval->coerced_type = type;
+      return true;
+    }
+    return e->getType() == type;
+  }
+
+  size_t tuple_count(selflang::expression *e) {
+    if (auto *tuple = dynamic_cast<selflang::tuple *>(e))
+      return tuple->members.size();
+    return 1;
+  }
+  template <typename T, bool pre = true, bool post = true>
+  auto bin_pass(auto &it, bool not_a_member, auto lhsrhsinc, auto cond,
+                auto cleanup) {
+    if (auto *t = dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
+      auto candidates =
+          selflang::pair_range(symbols.equal_range(t->get_token()));
+      auto lhs = it, rhs = it;
+      lhsrhsinc(lhs, rhs);
+      std::vector<const T *> valid;
+      for (auto &[_, fun] : candidates) {
+        if (const auto *op = dynamic_cast<const T *>(&fun.get());
+            op && (not_a_member ^ op->member)) {
+          cond(op, lhs, rhs, valid);
+        }
+      }
+      if (valid.empty())
+        return;
+      err_assert(valid.size() == 1, "ambiguous operator call");
+      auto result = std::make_unique<selflang::op_call>(*valid.back());
+      result->LHS = std::move(*lhs);
+      result->RHS = std::move(*rhs);
+      cleanup(lhs, rhs);
+      *it = std::move(result);
+    }
+  };
+
   selflang::expression_ptr evaluate_tree(selflang::expression_tree &tree) {
     if (tree.empty()) {
       return std::make_unique<selflang::tuple>();
@@ -188,55 +235,64 @@ struct global_parser {
     // ok not sure why the end check doesn't work but I have to check
     // if the tree is size 1
     for (auto it = tree.begin(); it != tree.end(); ++it) {
-      selflang::expression_tree arg;
-      if (auto *fun = dynamic_cast<selflang::fun_call *>(it->get())) {
-        ++it;
-        if (tree.end() == it) {
+      if (auto *t =
+              dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
+        auto args = it;
+        ++args;
+        if (args == tree.end())
           break;
+        auto candidates =
+            selflang::pair_range(symbols.equal_range(t->get_token()));
+        std::vector<const selflang::fun_def *> valid;
+        for (auto &[_, candidate] : candidates) {
+          if (const auto *fun =
+                  dynamic_cast<const selflang::fun_def *>(&candidate.get())) {
+            // TODO typechecking
+            if (fun->argcount() == tuple_count(args->get())) {
+              valid.push_back(fun);
+            }
+          }
         }
-        if (auto *tuple = dynamic_cast<selflang::tuple *>(it->get())) {
-          err_assert(tuple->members.size() == fun->definition.arguments.size(),
-                     "argument number mismatch");
-          // TODO: check types
-          std::for_each(tuple->members.begin(), tuple->members.end(),
-                        [&](selflang::expression_ptr &ptr) {
-                          fun->args.emplace_back(std::move(ptr));
-                        });
-          it = --tree.erase(it);
+        if (valid.empty())
+          continue;
+        err_assert(valid.size() == 1, "ambiguous operator call");
+        auto result = std::make_unique<selflang::op_call>(*valid.back());
+        if (auto *tuple = dynamic_cast<selflang::tuple *>(args->get())) {
+          result->RHS = std::make_unique<selflang::arg_pack>(std::move(*tuple));
         } else {
-          fun->args.emplace_back(std::move(*it));
-          it = --tree.erase(it);
+          result->RHS = std::move(*args);
         }
+        tree.erase(args);
+        *it = std::move(result);
       }
     }
 
-    auto a = tree.dump();
+    auto dump = tree.dump();
+
+    auto bin_cond = [&](auto *op, auto lhs, auto rhs, auto &valid) {
+      if (type_coerce(lhs->get(), op->LHS->decl_type()) &&
+          type_coerce(rhs->get(), op->RHS->decl_type())) {
+        valid.push_back(op);
+      };
+    };
     // left-right associative pass
     for (auto it = tree.begin(); it != tree.end(); ++it) {
-      if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
-          op && !op->get_def().is_member() && op->args.empty()) {
-        auto lhs = it, rhs = it;
-        --lhs, ++rhs;
-        auto left = selflang::expression_ptr(lhs->release()),
-             right = selflang::expression_ptr(rhs->release());
-        tree.erase(rhs), it = tree.erase(lhs);
-        op->add_arg(std::move(left));
-        op->add_arg(std::move(right));
-      }
+      bin_pass<selflang::operator_def>(
+          it, true, [](auto &lhs, auto &rhs) { --lhs, ++rhs; }, bin_cond,
+          [&](auto lhs, auto rhs) {
+            tree.erase(rhs);
+            it = tree.erase(lhs);
+          });
     }
+
     // right-left associative pass
     for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
-      if (auto *op = dynamic_cast<selflang::op_call *>(it->get());
-          op && op->get_def().is_member() && op->args.empty()) {
-        auto lhs = it, rhs = it;
-        ++lhs, --rhs;
-        auto left = selflang::expression_ptr(lhs->release()),
-             right = selflang::expression_ptr(rhs->release());
-        op->add_arg(std::move(left));
-        op->add_arg(std::move(right));
-        tree.erase(rhs.base());
-        it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
-      }
+      bin_pass<selflang::operator_def>(
+          it, false, [](auto &lhs, auto &rhs) { ++lhs, --rhs; }, bin_cond,
+          [&](auto lhs, auto rhs) {
+            tree.erase(rhs.base());
+            it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
+          });
     }
 
     err_assert(tree.size() == 1, "tree is not fully resolved");
@@ -245,10 +301,10 @@ struct global_parser {
     return last;
   }
 
-  selflang::expression_ptr parse_symbol(auto &base) {
+  selflang::expression_ptr parse_symbol(selflang::expression_ptr &base) {
     if (auto *maybe =
             dynamic_cast<selflang::unevaluated_expression *>(base.get());
-        maybe && !maybe->is_complete()) {
+        maybe && !maybe->isComplete()) {
       auto t = maybe->get_token();
       if (auto [is_int, number] = is_integer(t); is_int) {
         return std::make_unique<selflang::int_literal>(number);
@@ -262,17 +318,6 @@ struct global_parser {
         std::copy(str.begin(), str.end() - 1, std::back_inserter(value));
         return std::make_unique<selflang::string_literal>(value);
       }
-      auto symbol = symbols.find(maybe->get_token());
-      err_assert(symbol != symbols.end(), "Symbol not found");
-      if (auto *op =
-              dynamic_cast<const selflang::operator_def *>(symbol->second)) {
-        return std::make_unique<selflang::op_call>(*op);
-
-      } else if (auto *fun =
-                     dynamic_cast<const selflang::fun_def *>(symbol->second)) {
-        return std::make_unique<selflang::fun_call>(*fun);
-      }
-      err_assert(false, "conflicting symbols");
     }
     return std::move(base);
   }
@@ -306,7 +351,7 @@ struct global_parser {
       // TODO: deal with multiple candidates
       auto candidates = types.find(*t++);
       err_assert(candidates != types.end(), "type not found");
-      curr->type.ptr = candidates->second;
+      curr->type.ptr = &candidates->second.get();
       err_assert(*t == endl, "end of line expected");
       return curr;
     } else {
@@ -329,7 +374,7 @@ struct global_parser {
       // todo make this an expression instead of hardcoded
       auto candidates = types.find(*t++);
       err_assert(candidates != types.end(), "no types found");
-      curr->arguments.back()->type.ptr = candidates->second;
+      curr->arguments.back()->type.ptr = &candidates->second.get();
       err_assert(*t == ")" || *t == ",", "\")\" or \",\" expected");
       if (*t == ")")
         break;
@@ -340,14 +385,14 @@ struct global_parser {
       ++t;
       auto candidates = types.find(*t++);
       err_assert(candidates != types.end(), "type not found");
-      curr->return_type = candidates->second;
+      curr->return_type.ptr = &candidates->second.get();
       curr->body_defined = false;
     }
     if (*t == "{") {
       while (*t != "}") {
         using namespace selflang::reserved;
         if (*t == var_t) {
-          return var_parse(t);
+          curr->body.push_back(var_parse(++t));
         } else if (*t++ == return_t) {
           if (*t != endl) {
             curr->body.push_back(
@@ -362,7 +407,7 @@ struct global_parser {
       curr->body_defined = true;
     }
     ++t;
-    symbols.insert({curr->name, curr.get()});
+    symbols.insert({curr->name, *curr});
     return curr;
   }
 
@@ -413,22 +458,23 @@ struct global_parser {
     return syntax_tree;
   }
 
-  global_parser() {
-    types.insert({selflang::void_type.getName(), &selflang::void_type});
-    types.insert({selflang::byte_type.getName(), &selflang::byte_type});
-    types.insert({selflang::type_type.getName(), &selflang::type_type});
-    types.insert({selflang::int_type.getName(), &selflang::int_type});
-    types.insert({selflang::char_type.getName(), &selflang::char_type});
-    symbols.insert({selflang::int_token_assignment.getName(),
-                    &selflang::int_token_assignment});
-    symbols.insert(
-        {selflang::internal_addi.getName(), &selflang::internal_addi});
-    symbols.insert(
-        {selflang::internal_subi.getName(), &selflang::internal_subi});
-    symbols.insert(
-        {selflang::internal_muli.getName(), &selflang::internal_muli});
-    symbols.insert(
-        {selflang::internal_divi.getName(), &selflang::internal_divi});
+  global_parser() : symbols() {
+    const auto type_inserter = [this](const selflang::var_decl &var) {
+      types.insert({var.getName(), std::cref(var)});
+    };
+    type_inserter(selflang::void_type);
+    type_inserter(selflang::byte_type);
+    type_inserter(selflang::type_type);
+    type_inserter(selflang::int_type);
+    type_inserter(selflang::char_type);
+    const auto symbol_inserter = [this](const selflang::expression &expr) {
+      symbols.insert({expr.getName(), std::cref(expr)});
+    };
+    symbol_inserter(selflang::int_token_assignment);
+    symbol_inserter(selflang::internal_addi);
+    symbol_inserter(selflang::internal_subi);
+    symbol_inserter(selflang::internal_muli);
+    symbol_inserter(selflang::internal_divi);
   }
 };
 } // namespace

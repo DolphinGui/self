@@ -44,7 +44,7 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 llvm_map_components_to_libnames(llvm_libs support core target codegen)
 
-add_library(selfast ${COMPILER_SRC}/ast.cpp)
+add_library(selfast ${COMPILER_SRC}/ast.cpp ${COMPILER_SRC}/complete_types.cpp)
 target_include_directories(selfast PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfast PROPERTY CXX_STANDARD 20)
 
@@ -52,8 +52,8 @@ add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
 target_link_libraries(selfparse PUBLIC re2::re2 selfast)
-# target_compile_options(selfparse PUBLIC -fsanitize=address)
-# target_link_options(selfparse PUBLIC -fsanitize=address)
+target_compile_options(selfparse PUBLIC -fsanitize=address)
+target_link_options(selfparse PUBLIC -fsanitize=address)
 # For now I haven't been having mem leak issues, and the
 # indirect leak warnings from llvm have been pretty annoying.
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)

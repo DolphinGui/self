@@ -24,18 +24,14 @@ struct expression_tree : public expression, public expression_list {
   virtual token_view getName() const noexcept override {
     return "expression tree";
   }
-  bool is_complete() const noexcept override {
+  bool isComplete() const noexcept override {
     for (auto &expr : *this) {
-      if (!expr->is_complete())
+      if (!expr->isComplete())
         return false;
     }
     return true;
   }
-  void complete_types() override {
-    for (auto &expr : *this) {
-      expr->complete_types();
-    }
-  }
+  void complete_types();
 };
 struct namespace_tree : expression_tree {
   token name;

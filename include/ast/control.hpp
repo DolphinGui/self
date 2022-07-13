@@ -11,6 +11,11 @@ struct ret : public expression {
       out << "returns " << *value;
     return out;
   }
-  bool is_complete() const noexcept override { return !value; }
+  bool isComplete() const noexcept override { 
+    if(value){
+      return value->isComplete();
+    }
+    return true;
+   }
 };
 } // namespace selflang
