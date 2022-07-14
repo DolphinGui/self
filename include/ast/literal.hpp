@@ -12,6 +12,8 @@ using var_decl_ref = std::reference_wrapper<var_decl>;
 namespace detail {
 inline std::unordered_map<size_t, const var_decl_ref> global_typeid_builtin_map;
 }
+
+// builtins can be created using literals
 struct builtin_type : public var_decl {
   builtin_type(token_view name, type_ref type, const std::type_info &key)
       : var_decl(name, type) {
@@ -34,8 +36,12 @@ template <typename T> struct literal : public expression {
   inline token_view getName() const noexcept override {
     return "literal value";
   };
-  literal(T value)
-      : literal(value,
+  literal(T &&value)
+      : literal(std::move(value),
+                {detail::global_typeid_builtin_map.at(typeid(T).hash_code())}) {
+  }
+  literal(const T &value)
+      : literal(std::move(value),
                 {detail::global_typeid_builtin_map.at(typeid(T).hash_code())}) {
   }
   type_ptr getType() const noexcept override {
@@ -43,6 +49,7 @@ template <typename T> struct literal : public expression {
   }
 
 private:
-  literal(T itself, var_ref type) : value(itself), type{type} {};
+  literal(T &&itself, var_ref type) : value(std::move(itself)), type{type} {};
+  literal(const T &itself, var_ref type) : value(itself), type{type} {};
 };
 } // namespace selflang

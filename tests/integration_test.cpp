@@ -16,9 +16,11 @@ constexpr auto file = R"(
 fun selfputchar(c: char)->i32;
 fun selfflush()->void;
 fun printmulti(c: char, i: i32)->i32;
+fun geterrno()->i32;
 fun main()->i32{
   "this is a string\n";
   var a = 5 - 2;
+  var errno = geterrno();
   selfputchar('h');
   selfputchar('e');
   selfputchar('l');

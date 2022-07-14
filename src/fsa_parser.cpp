@@ -22,6 +22,7 @@
 #include "lexer.hpp"
 #include "literals.hpp"
 #include "pair_range.hpp"
+#include "scope_guard.hpp"
 
 namespace {
 auto is_integer(selflang::token_view t) {
@@ -100,6 +101,7 @@ struct global_parser {
                                              selflang::expression_const_ref>;
   symbol_map symbols;
   using self = global_parser;
+  std::vector<std::string> curr_scope;
   // todo: add proper compile error reporting later.
   auto err_assert(bool condition, std::string_view message) {
     if (!condition) {
@@ -138,6 +140,7 @@ struct global_parser {
   static void subtree_pass(selflang::expression_tree &tree) {
     return subtree_pass(tree, tree.begin(), tree.end());
   }
+
   void tuple_pass(selflang::expression_tree &tree) {
     size_t size = 0;
     auto tuple = std::make_unique<selflang::tuple>();
@@ -171,8 +174,25 @@ struct global_parser {
       tree.push_back(std::move(tuple));
     }
   }
+  enum struct coerce_result { match, coerce, mismatch };
+  coerce_result need_coerce(const selflang::expression *e,
+                            selflang::type_ptr type) {
+    using enum coerce_result;
+    if (const auto *var = dynamic_cast<const selflang::var_decl *>(e)) {
+      if (!var->type.ptr) {
+        return coerce;
+      }
+    } else if (const auto *uneval =
+                   dynamic_cast<const selflang::unevaluated_expression *>(e)) {
+      return coerce;
+    }
+    if (e->getType() == type)
+      return match;
+    else
+      return mismatch;
+  }
 
-  bool type_coerce(selflang::expression *e, selflang::type_ptr type) {
+  static bool type_coerce(selflang::expression *e, selflang::type_ptr type) {
     if (auto *var = dynamic_cast<selflang::var_decl *>(e)) {
       if (!var->type.ptr) {
         var->type = type;
@@ -186,34 +206,58 @@ struct global_parser {
     return e->getType() == type;
   }
 
-  size_t tuple_count(selflang::expression *e) {
+  static size_t tuple_count(selflang::expression *e) {
     if (auto *tuple = dynamic_cast<selflang::tuple *>(e))
       return tuple->members.size();
     return 1;
   }
+
+  static void for_tuple(selflang::expression *e, auto unary) {
+    if (auto *tuple = dynamic_cast<selflang::tuple *>(e)) {
+      for (auto &a : tuple->members) {
+        unary(*a);
+      }
+    }
+    unary(*e);
+  }
+  static void for_tuple(selflang::expression *left, auto gen, auto binary) {
+    if (auto *tuple = dynamic_cast<selflang::tuple *>(left)) {
+      for (auto l = tuple->members.begin(); l != tuple->members.end(); ++l) {
+        binary(**l, gen());
+      }
+      throw std::runtime_error("for tuple mismatch");
+    }
+    binary(*left, gen());
+  }
   template <typename T, bool pre = true, bool post = true>
   auto bin_pass(auto &it, bool not_a_member, auto lhsrhsinc, auto cond,
-                auto cleanup) {
+                auto cleanup, auto insert, auto coerce) {
     if (auto *t = dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
       auto candidates =
           selflang::pair_range(symbols.equal_range(t->get_token()));
       auto lhs = it, rhs = it;
       lhsrhsinc(lhs, rhs);
-      std::vector<const T *> valid;
+      std::vector<const T *> no_coerce;
+      std::vector<const T *> corced;
+      auto count = std::distance(candidates.begin(), candidates.end());
       for (auto &[_, fun] : candidates) {
         if (const auto *op = dynamic_cast<const T *>(&fun.get());
             op && (not_a_member ^ op->member)) {
-          cond(op, lhs, rhs, valid);
+          cond(op, lhs, rhs, no_coerce, corced);
         }
       }
-      if (valid.empty())
-        return;
-      err_assert(valid.size() == 1, "ambiguous operator call");
-      auto result = std::make_unique<selflang::op_call>(*valid.back());
-      result->LHS = std::move(*lhs);
-      result->RHS = std::move(*rhs);
-      cleanup(lhs, rhs);
-      *it = std::move(result);
+      if (!no_coerce.empty()) {
+        err_assert(no_coerce.size() == 1, "ambiguous operator call");
+        auto result = insert(no_coerce.back(), lhs, rhs);
+        cleanup(lhs, rhs);
+        *it = std::move(result);
+      } else if (!corced.empty()) {
+        err_assert(corced.size() == 1, "ambiguous operator call");
+        coerce(*corced.back(), *lhs, *rhs);
+        auto result = insert(corced.back(), lhs, rhs);
+        cleanup(lhs, rhs);
+        *it = std::move(result);
+      }
     }
   };
 
@@ -230,50 +274,61 @@ struct global_parser {
     tuple_pass(tree);
     for (auto &ptr : tree) {
       ptr = parse_symbol(ptr);
-    }
+    } // clang-format off
 
-    // ok not sure why the end check doesn't work but I have to check
-    // if the tree is size 1
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wunused-parameter"
     for (auto it = tree.begin(); it != tree.end(); ++it) {
-      if (auto *t =
-              dynamic_cast<selflang::unevaluated_expression *>(it->get())) {
-        auto args = it;
-        ++args;
-        if (args == tree.end())
-          break;
-        auto candidates =
-            selflang::pair_range(symbols.equal_range(t->get_token()));
-        std::vector<const selflang::fun_def *> valid;
-        for (auto &[_, candidate] : candidates) {
-          if (const auto *fun =
-                  dynamic_cast<const selflang::fun_def *>(&candidate.get())) {
-            // TODO typechecking
-            if (fun->argcount() == tuple_count(args->get())) {
-              valid.push_back(fun);
+      bin_pass<selflang::fun_def>(
+          it, true, [](auto &lhs, auto &rhs) { ++rhs; },
+          [](auto *fun, auto lhs, auto rhs,
+             auto &perfect, auto& less_than) {
+            if (fun->argcount() == tuple_count(rhs->get())) {
+              perfect.push_back(fun);
             }
-          }
-        }
-        if (valid.empty())
-          continue;
-        err_assert(valid.size() == 1, "ambiguous operator call");
-        auto result = std::make_unique<selflang::op_call>(*valid.back());
-        if (auto *tuple = dynamic_cast<selflang::tuple *>(args->get())) {
-          result->RHS = std::make_unique<selflang::arg_pack>(std::move(*tuple));
-        } else {
-          result->RHS = std::move(*args);
-        }
-        tree.erase(args);
-        *it = std::move(result);
-      }
+          },
+          [&](auto lhs, auto rhs) { tree.erase(rhs); },
+          [&](const selflang::fun_def *fun, auto lhs, auto rhs) {
+            auto result = std::make_unique<selflang::op_call>(*fun);
+            if (auto *tuple = dynamic_cast<selflang::tuple *>(rhs->get())) {
+              result->RHS =
+                  std::make_unique<selflang::arg_pack>(std::move(*tuple));
+            } else {
+              result->RHS = std::move(*rhs);
+            }
+            return result;
+          }, [](const selflang::fun_def& fun, auto& lhs, auto& rhs){
+            int i = 0;
+            for_tuple(rhs.get(), [&]{
+              return fun.arguments.at(i++)->decl_type();},
+              [](selflang::expression& e, auto type){type_coerce(&e, type);});
+          });
     }
+    #pragma clang diagnostic pop // clang-format on
 
     auto dump = tree.dump();
 
-    auto bin_cond = [&](auto *op, auto lhs, auto rhs, auto &valid) {
-      if (type_coerce(lhs->get(), op->LHS->decl_type()) &&
-          type_coerce(rhs->get(), op->RHS->decl_type())) {
-        valid.push_back(op);
-      };
+    auto bin_cond = [&](auto *op, auto lhs, auto rhs, auto &no_coerce,
+                        auto &coerce_r) {
+      using enum coerce_result;
+      auto left = need_coerce(lhs->get(), op->LHS->decl_type());
+      auto right = need_coerce(rhs->get(), op->RHS->decl_type());
+      if (left == match && right == match) {
+        no_coerce.push_back(op);
+      } else if (left != mismatch && right != mismatch) {
+        coerce_r.push_back(op);
+      }
+    };
+    auto bin_insert = [](const selflang::operator_def *o, auto lhs, auto rhs) {
+      auto result = std::make_unique<selflang::op_call>(*o);
+      result->LHS = std::move(*lhs);
+      result->RHS = std::move(*rhs);
+      return result;
+    };
+    auto bin_coerce = [](const selflang::operator_def &fun, auto &lhs,
+                         auto &rhs) {
+      type_coerce(lhs.get(), fun.LHS->decl_type());
+      type_coerce(rhs.get(), fun.RHS->decl_type());
     };
     // left-right associative pass
     for (auto it = tree.begin(); it != tree.end(); ++it) {
@@ -282,7 +337,8 @@ struct global_parser {
           [&](auto lhs, auto rhs) {
             tree.erase(rhs);
             it = tree.erase(lhs);
-          });
+          },
+          bin_insert, bin_coerce);
     }
 
     // right-left associative pass
@@ -292,7 +348,8 @@ struct global_parser {
           [&](auto lhs, auto rhs) {
             tree.erase(rhs.base());
             it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
-          });
+          },
+          bin_insert, bin_coerce);
     }
 
     err_assert(tree.size() == 1, "tree is not fully resolved");
@@ -329,13 +386,19 @@ struct global_parser {
       start(*tree);
     }
     while (*t != selflang::reserved::endl) {
-      tree->push_back(std::make_unique<selflang::unevaluated_expression>(*t++));
+      if (*t == selflang::reserved::struct_t) {
+        tree->push_back(struct_parse(++t));
+      } else if (*t == selflang::reserved::var_t) {
+      } else {
+        tree->push_back(
+            std::make_unique<selflang::unevaluated_expression>(*t++));
+      }
     }
     auto result = evaluate_tree(*tree);
     return result;
   }
 
-  selflang::expression_ptr var_parse(token_it &t) {
+  selflang::expression_ptr var_parse(token_it &t, selflang::token_view name) {
     using namespace selflang::reserved;
     const auto guard = [this](auto t) {
       if (!reserved_guard(t)) {
@@ -344,8 +407,8 @@ struct global_parser {
         err_assert(false, err.str());
       }
     };
-    guard(*t);
-    auto curr = std::make_unique<selflang::var_decl>(*t++);
+    guard(name);
+    auto curr = std::make_unique<selflang::var_decl>(name);
     if (*t == ":") {
       ++t;
       // TODO: deal with multiple candidates
@@ -364,6 +427,8 @@ struct global_parser {
   }
 
   selflang::expression_ptr fun_parse(token_it &t, selflang::token_view name) {
+    auto g = selflang::scope_guard([&]() { curr_scope.emplace_back(name); },
+                                   [&]() noexcept { curr_scope.pop_back(); });
     auto curr = std::make_unique<selflang::fun_def>(name);
     err_assert(*t++ == "(", "\"(\" expected");
     while (*t != ")") {
@@ -392,7 +457,8 @@ struct global_parser {
       while (*t != "}") {
         using namespace selflang::reserved;
         if (*t == var_t) {
-          curr->body.push_back(var_parse(++t));
+          auto name = *++t;
+          curr->body.push_back(var_parse(++t, name));
         } else if (*t++ == return_t) {
           if (*t != endl) {
             curr->body.push_back(
@@ -416,26 +482,30 @@ struct global_parser {
     if (*t == "(") {
       ++t;
       if (*t == ")") {
-        return std::make_unique<selflang::opaque_struct>();
+        ++t;
+        return std::make_unique<selflang::opaque_struct_literal>(0);
       } else {
-        auto [success, size] = is_integer(*t);
+        auto [success, size] = is_integer(*t++);
         err_assert(success, "Expected integer or \")\"");
-        return std::make_unique<selflang::opaque_struct>(size);
+        return std::make_unique<selflang::opaque_struct_literal>(size);
       }
     } else {
-      auto result = std::make_unique<selflang::struct_def>();
+      auto result = selflang::struct_def();
       while (*t != "}") {
         if (*(++t) == "var") {
-          result->body.push_back(var_parse(t));
+          auto name = *++t;
+          result.body.push_back(var_parse(++t, name));
         } else if (*t == "fun") {
           auto name = *++t;
           err_assert(reserved_guard(name), "function name is reserved");
-          result->body.push_back(fun_parse(t, name));
+          result.body.push_back(fun_parse(t, name));
         } else {
-          err_assert(false, "expected a function or variable declaration.");
+          err_assert(*t != selflang::reserved::endl,
+                     "expected a function or variable declaration.");
         }
       }
-      return result;
+      ++t;
+      return std::make_unique<selflang::struct_literal>(std::move(result));
     }
   }
 
@@ -444,7 +514,8 @@ struct global_parser {
     using namespace selflang::reserved;
     while (!t.end()) {
       if (*t == var_t) {
-        syntax_tree.emplace_back(var_parse(++t));
+        auto name = *++t;
+        syntax_tree.emplace_back(var_parse(++t, name));
       } else if (*t == fun_t) {
         auto name = *++t;
         err_assert(reserved_guard(name), "function name is reserved");
@@ -470,11 +541,12 @@ struct global_parser {
     const auto symbol_inserter = [this](const selflang::expression &expr) {
       symbols.insert({expr.getName(), std::cref(expr)});
     };
-    symbol_inserter(selflang::int_token_assignment);
-    symbol_inserter(selflang::internal_addi);
-    symbol_inserter(selflang::internal_subi);
-    symbol_inserter(selflang::internal_muli);
-    symbol_inserter(selflang::internal_divi);
+    symbol_inserter(selflang::i32_assignment);
+    symbol_inserter(selflang::addi);
+    symbol_inserter(selflang::subi);
+    symbol_inserter(selflang::muli);
+    symbol_inserter(selflang::divi);
+    symbol_inserter(selflang::struct_assignment);
   }
 };
 } // namespace

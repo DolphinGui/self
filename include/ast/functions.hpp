@@ -31,6 +31,11 @@ protected:
                bool member = false)
       : name(name), return_type{&return_type}, member(member) {}
 
+  fun_def_base(token_view name, type_ref return_type, bool member = false)
+      : name(name), return_type{.ptr = &return_type.ptr,
+                                .is_ref = return_type.is_ref},
+        member(member) {}
+
 public:
   // virtual std::ostream &print(std::ostream &out) const override;
   std::string_view getName() const noexcept override { return name; }
@@ -47,6 +52,11 @@ public:
   std::unique_ptr<var_decl> LHS;
   std::unique_ptr<var_decl> RHS;
   operator_def(token_view name, const var_decl &return_type,
+               std::unique_ptr<var_decl> &&LHS, std::unique_ptr<var_decl> &&RHS,
+               bool member = false)
+      : fun_def_base(name, return_type, member), LHS(std::move(LHS)),
+        RHS(std::move(RHS)) {}
+  operator_def(token_view name, type_ref return_type,
                std::unique_ptr<var_decl> &&LHS, std::unique_ptr<var_decl> &&RHS,
                bool member = false)
       : fun_def_base(name, return_type, member), LHS(std::move(LHS)),

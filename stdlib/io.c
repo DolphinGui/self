@@ -29,3 +29,4 @@ int printmulti(unsigned char c, int n) {
   }
   return 0;
 }
+int geterrno() { return errno; }

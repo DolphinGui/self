@@ -11,6 +11,8 @@ namespace selflang {
 class var_decl;
 struct fun_def_base;
 struct struct_def : public expression {
+  struct_def() = default;
+  struct_def(struct_def &&other): body(std::move(other.body)){}
   expression_tree body;
   std::ostream &print(std::ostream &out) const override {
     out << "struct decl: ";
