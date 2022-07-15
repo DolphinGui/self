@@ -1,6 +1,6 @@
 #pragma once
 #include <utility>
-namespace selflang {
+namespace self {
 template <typename T> class pair_range {
   std::pair<T, T> range;
 
@@ -9,4 +9,4 @@ public:
   auto begin() { return range.first; }
   auto end() { return range.second; }
 };
-} // namespace selflang
+} // namespace self

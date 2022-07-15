@@ -5,11 +5,11 @@
 #include <memory>
 #include <vector>
 
-namespace selflang {
-struct tuple : public expression {
-  tuple() = default;
-  tuple(expression_tree &&contents) : members(std::move(contents)) {}
-  expression_tree members;
+namespace self {
+struct Tuple : public Expression {
+  Tuple() = default;
+  Tuple(ExpressionTree &&contents) : members(std::move(contents)) {}
+  ExpressionTree members;
   std::ostream &print(std::ostream &out) const override {
     out << '(';
     for (auto &m : members) {
@@ -17,10 +17,10 @@ struct tuple : public expression {
     }
     return out << ')';
   }
-  token_view getName() const noexcept override { return "tuple"; };
+  TokenView getName() const noexcept override { return "tuple"; };
 };
-struct arg_pack: public tuple{
+struct arg_pack : public Tuple {
   arg_pack() = default;
-  arg_pack(tuple&& other):tuple(std::move(other)){}
+  arg_pack(Tuple &&other) : Tuple(std::move(other)) {}
 };
-} // namespace selflang
+} // namespace self

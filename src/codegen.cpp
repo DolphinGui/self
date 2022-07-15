@@ -32,15 +32,11 @@
 #include "ast/variables.hpp"
 #include "builtins.hpp"
 
-namespace selflang {
-llvm::Type *getType(const var_decl &);
-}
 namespace {
 llvm::LLVMContext context;
-llvm::Value *dispatch(const selflang::expression *expr,
-                      llvm::IRBuilder<> &builder);
-void unpack_args(selflang::expression *e, auto unary) {
-  if (auto *args = dynamic_cast<selflang::arg_pack *>(e)) {
+llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder);
+void unpackArgs(self::Expression *e, auto unary) {
+  if (auto *args = dynamic_cast<self::arg_pack *>(e)) {
     for (auto &arg : args->members) {
       unary(*arg);
     }
@@ -48,83 +44,122 @@ void unpack_args(selflang::expression *e, auto unary) {
     unary(*e);
   }
 }
-void for_each_arg(const selflang::op_call &base, auto unary) {
+void forEachArg(const self::FunctionCall &base, auto unary) {
   if (base.isBinary()) {
-    unpack_args(base.LHS.get(), unary);
-    unpack_args(base.RHS.get(), unary);
+    unpackArgs(base.LHS.get(), unary);
+    unpackArgs(base.RHS.get(), unary);
   } else if (base.isUnaryPre()) {
-    unpack_args(base.RHS.get(), unary);
+    unpackArgs(base.RHS.get(), unary);
   } else {
     throw std::runtime_error("unimplemented");
   }
 }
-void for_each_arg(const selflang::fun_def_base *def, auto unary) {
-  if (auto *fun = dynamic_cast<const selflang::fun_def *>(def)) {
+void forEachArg(const self::FunBase *def, auto unary) {
+  if (auto *fun = dynamic_cast<const self::FunctionDef *>(def)) {
     std::for_each(fun->arguments.begin(), fun->arguments.end(), unary);
   } else {
-    auto &op = dynamic_cast<const selflang::operator_def &>(*def);
+    auto &op = dynamic_cast<const self::OperatorDef &>(*def);
     unary(op.LHS);
     unary(op.RHS);
   }
 }
 
-llvm::Value *call_gen(const selflang::op_call &base,
+llvm::Type *getType(const self::Type &t) {
+  if (&t != &self::type_inst) {
+    // return var.type_ref.ptr->
+    throw std::runtime_error("non ints not implemented right now");
+
+  } else {
+    if (&t == &self::i64_t.value) {
+      return llvm::Type::getInt64Ty(context);
+    }
+    if (&t == &self::char_t.value) {
+      return llvm::Type::getInt8Ty(context);
+    }
+    if (&t == &self::void_t.value) {
+      return llvm::Type::getVoidTy(context);
+    }
+  }
+  throw std::runtime_error("non ints not implemented right now");
+}
+llvm::Type *getType(const self::VarDeclaration &var) {
+  return getType(*var.type_ref.ptr);
+}
+void generateFun(const self::FunBase *fun, llvm::Module &module) {
+  std::vector<llvm::Type *> arg_types;
+  arg_types.reserve(fun->argcount());
+  forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
+    arg_types.push_back(getType(*a));
+  });
+  auto type =
+      llvm::FunctionType::get(getType(*fun->return_type.ptr), arg_types, false);
+  auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
+                                       fun->getName(), module);
+  if (fun->body_defined) {
+    auto block = llvm::BasicBlock::Create(context, "entry", result);
+    auto builder = llvm::IRBuilder<>(context);
+    builder.SetInsertPoint(block);
+    for (auto &a : fun->body) {
+      dispatch(a.get(), builder);
+    }
+  }
+}
+llvm::Value *generateFunCall(const self::FunctionCall &base,
                       llvm::IRBuilder<> &builder) {
   llvm::FunctionType *type;
 
   {
     std::vector<llvm::Type *> arg_types;
     arg_types.reserve(base.definition.argcount());
-    const auto arg_push = [&](const std::unique_ptr<selflang::var_decl> &a) {
+    const auto arg_push = [&](const std::unique_ptr<self::VarDeclaration> &a) {
       arg_types.push_back(getType(*a));
     };
-    for_each_arg(&base.definition, arg_push);
-    type = llvm::FunctionType::get(
-        selflang::getType(*base.definition.return_type.ptr), arg_types, false);
+    forEachArg(&base.definition, arg_push);
+    type = llvm::FunctionType::get(getType(*base.definition.return_type.ptr),
+                                   arg_types, false);
   }
   auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
   auto *val = table.lookup(base.definition.getName());
   auto callee = llvm::FunctionCallee(type, val);
   std::vector<llvm::Value *> args;
   args.reserve(base.definition.argcount());
-  for_each_arg(base, [&](const selflang::expression &e) {
+  forEachArg(base, [&](const self::Expression &e) {
     args.push_back(dispatch(&e, builder));
   });
   return builder.CreateCall(callee, args);
 }
-llvm::Value *fun_call_gen(const selflang::op_call &fun,
+llvm::Value *generateCall(const self::FunctionCall &fun,
                           llvm::IRBuilder<> &builder) {
   llvm::Value *result = nullptr;
-  switch (selflang::detail::hash_value(fun.get_def().hash)) {
-  case selflang::detail::addi:
+  switch (self::detail::BuiltinInstruction(fun.get_def().hash)) {
+  case self::detail::addi:
     result = builder.CreateAdd(dispatch(fun.LHS.get(), builder),
                                dispatch(fun.RHS.get(), builder));
     break;
-  case selflang::detail::store:
+  case self::detail::store:
     result = builder.CreateStore(dispatch(fun.RHS.get(), builder),
                                  dispatch(fun.LHS.get(), builder));
     break;
-  case selflang::detail::subi:
+  case self::detail::subi:
     result = builder.CreateSub(dispatch(fun.LHS.get(), builder),
                                dispatch(fun.RHS.get(), builder));
     break;
-  case selflang::detail::muli:
+  case self::detail::muli:
     result = builder.CreateMul(dispatch(fun.LHS.get(), builder),
                                dispatch(fun.RHS.get(), builder));
     break;
-  case selflang::detail::divi:
+  case self::detail::divi:
     result = builder.CreateSDiv(dispatch(fun.LHS.get(), builder),
                                 dispatch(fun.RHS.get(), builder));
     break;
-  case selflang::detail::none:
-    return call_gen(fun, builder);
+  case self::detail::none:
+    return generateFunCall(fun, builder);
     break;
   }
   return result;
 }
 
-llvm::Value *create_string(const selflang::string_literal &str,
-                           llvm::Module &m) {
+llvm::Value *createString(const self::StringLit &str, llvm::Module &m) {
 
   auto arr_type =
       llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
@@ -150,32 +185,30 @@ llvm::Value *create_string(const selflang::string_literal &str,
   return global;
 }
 
-llvm::Value *dispatch(const selflang::expression *expr,
+llvm::Value *dispatch(const self::Expression *expr,
                       llvm::IRBuilder<> &builder) {
-  if (auto *fun = dynamic_cast<const selflang::op_call *>(expr)) {
-    return fun_call_gen(*fun, builder);
-  } else if (auto &type = typeid(*expr); type == typeid(selflang::ret)) {
-    auto &ret = dynamic_cast<const selflang::ret &>(*expr);
+  if (auto *fun = dynamic_cast<const self::FunctionCall *>(expr)) {
+    return generateCall(*fun, builder);
+  } else if (auto &type = typeid(*expr); type == typeid(self::Ret)) {
+    auto &ret = dynamic_cast<const self::Ret &>(*expr);
     if (ret.value) {
       return builder.CreateRet(dispatch(ret.value.get(), builder));
     } else {
       return builder.CreateRetVoid();
     }
-  } else if (type == typeid(selflang::int_literal)) {
+  } else if (type == typeid(self::IntLit)) {
     return llvm::ConstantInt::get(
         llvm::Type::getInt32Ty(context),
-        llvm::APInt(32,
-                    dynamic_cast<const selflang::int_literal &>(*expr).value));
-  } else if (type == typeid(selflang::char_literal)) {
+        llvm::APInt(32, dynamic_cast<const self::IntLit &>(*expr).value));
+  } else if (type == typeid(self::CharLit)) {
     return llvm::ConstantInt::get(
         llvm::Type::getInt8Ty(context),
-        llvm::APInt(8,
-                    dynamic_cast<const selflang::char_literal &>(*expr).value));
-  } else if (type == typeid(selflang::string_literal)) {
-    auto &str = dynamic_cast<const selflang::string_literal &>(*expr);
-    return create_string(str, *builder.GetInsertBlock()->getModule());
-  } else if (type == typeid(selflang::var_decl)) {
-    auto &var = dynamic_cast<const selflang::var_decl &>(*expr);
+        llvm::APInt(8, dynamic_cast<const self::CharLit &>(*expr).value));
+  } else if (type == typeid(self::StringLit)) {
+    auto &str = dynamic_cast<const self::StringLit &>(*expr);
+    return createString(str, *builder.GetInsertBlock()->getModule());
+  } else if (type == typeid(self::VarDeclaration)) {
+    auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
     return builder.CreateAlloca(getType(var), 0, var.getName());
   } else {
     std::cerr << type.name() << '\n';
@@ -183,61 +216,27 @@ llvm::Value *dispatch(const selflang::expression *expr,
   }
 }
 
-void fun_gen(const selflang::fun_def_base *fun, llvm::Module &module) {
-  std::vector<llvm::Type *> arg_types;
-  arg_types.reserve(fun->argcount());
-  for_each_arg(fun, [&](const std::unique_ptr<selflang::var_decl> &a) {
-    arg_types.push_back(getType(*a));
-  });
-  auto type =
-      llvm::FunctionType::get(getType(*fun->return_type.ptr), arg_types, false);
-  auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
-                                       fun->getName(), module);
-  if (fun->body_defined) {
-    auto block = llvm::BasicBlock::Create(context, "entry", result);
-    auto builder = llvm::IRBuilder<>(context);
-    builder.SetInsertPoint(block);
-    for (auto &a : fun->body) {
-      dispatch(a.get(), builder);
-    }
-  }
-}
+
 
 } // namespace
 
-namespace selflang {
-std::unique_ptr<llvm::Module> codegen(const selflang::expression_tree &ast) {
+namespace self {
+std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast) {
   auto module = std::make_unique<llvm::Module>(
       "todo: make module name meaningful", context);
   for (auto &expr : ast) { // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
     // clang-format on
-    if (auto *fun_def = dynamic_cast<selflang::fun_def_base *>(
-            expr.get())) { // clang-format off
+    if (auto *FunctionDef =
+            dynamic_cast<self::FunBase *>(expr.get())) { // clang-format off
     #pragma clang diagnostic pop
       // clang-format on
-      fun_gen(fun_def, *module);
+      generateFun(FunctionDef, *module);
     } else {
       throw std::runtime_error("unimplemented");
     }
   }
   return module;
 }
-llvm::Type *getType(const var_decl &var) {
-  if (var.type.ptr != &type_type) {
-    return getType(*var.type.ptr);
-  } else {
-    if (&var == &int_type) {
-      return llvm::Type::getInt32Ty(context);
-    }
-    if (&var == &char_type) {
-      return llvm::Type::getInt8Ty(context);
-    }
-    if (&var == &void_type) {
-      return llvm::Type::getVoidTy(context);
-    }
-  }
-  throw std::runtime_error("non ints not implemented right now");
-}
-} // namespace selflang
+} // namespace self

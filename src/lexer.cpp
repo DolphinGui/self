@@ -16,7 +16,7 @@
 
 namespace {
 
-using namespace selflang;
+using namespace self;
 auto preprocess(std::string contents) {
   RE2::Replace(&contents, R"(\/\/.*?\n)", " ");
   RE2::Replace(&contents, R"(\/\*[\S\s]*?\*\/)", " ");
@@ -25,23 +25,23 @@ auto preprocess(std::string contents) {
   return contents;
 }
 
-auto token_parse(std::string whole) {
+auto Token_parse(std::string whole) {
   re2::StringPiece input(whole);
-  token cur_token;
-  token_vec token_list;
+  Token cur_Token;
+  TokenVec Token_list;
   while (RE2::FindAndConsume(
       &input, R"(((?:->|'.+'|".+")|[(){}[\];,<>:]|[^<>\s(){};,[\]'":]+))",
-      &cur_token)) {
-    token_list.push_back(cur_token);
+      &cur_Token)) {
+    Token_list.push_back(cur_Token);
   }
-  return token_list;
+  return Token_list;
 }
 
 } // namespace
-namespace selflang {
-expression_tree lex(std::string in) {
-  return parse(token_parse(preprocess(in)));
+namespace self {
+ExpressionTree lex(std::string in) {
+  return parse(Token_parse(preprocess(in)));
   using namespace std::literals;
 }
-} // namespace selflang
+} // namespace self
   /* */

@@ -2,58 +2,56 @@
 
 #include "ast/expression.hpp"
 #include <functional>
-#include <unordered_map>
+#include <unordered_set>
 
-namespace selflang {
+namespace self {
 
-class var_decl : public expression {
-  token name;
+class VarDeclaration : public Expression {
+  Token name;
 
 public:
-  type_ptr type;
-  var_decl(token_view name) : name(name), type{nullptr} {}
-  var_decl(token_view name, type_ref type)
-      : name(name), type{&type.ptr, type.is_ref} {}
-  var_decl(token_view name, const var_decl &type) : name(name), type{&type} {}
+  TypePtr type_ref;
+  VarDeclaration(TokenView name) : name(name), type_ref{nullptr} {}
+  VarDeclaration(TokenView name, TypeRef type)
+      : name(name), type_ref{&type.ptr, type.is_ref} {}
 
-  token_view getName() const noexcept override { return name; }
+  TokenView getName() const noexcept override { return name; }
   inline std::ostream &print(std::ostream &out) const override {
-    if (type.ptr)
-      return out << "var " << name << ": " << type.ptr->getName();
+    if (type_ref.ptr)
+      return out << "var " << name << ": " << type_ref.ptr->getTypename();
     else
       return out << "var  " << name;
   }
-  bool isComplete() const override { return type.ptr; }
-  type_ptr getType() const noexcept override {
-    auto result = type;
-    result.is_ref = ref_types::ref;
+  bool isComplete() const override { return type_ref.ptr; }
+  TypePtr getType() const noexcept override {
+    auto result = type_ref;
+    result.is_ref = RefTypes::ref;
     return result;
   }
-  type_ptr decl_type() const noexcept { return type; }
+  TypePtr getDecltype() const noexcept { return type_ref; }
 };
 
 // name, type/value
-std::unique_ptr<var_decl> var_decl_ptr(auto &&...args) {
-  return std::make_unique<var_decl>(std::forward<decltype(args)>(args)...);
+std::unique_ptr<VarDeclaration> VarDeclarationPtr(auto &&...args) {
+  return std::make_unique<VarDeclaration>(
+      std::forward<decltype(args)>(args)...);
 }
-using var_ref = std::reference_wrapper<const var_decl>;
-using type_list = std::unordered_multimap<std::string_view, var_ref>;
 
-class var_deref : public expression {
-  const var_decl &definition;
+class VarDeref : public Expression {
+  const VarDeclaration &definition;
 
 public:
-  var_deref(const var_decl &itself) : definition(itself){};
+  VarDeref(const VarDeclaration &itself) : definition(itself){};
   inline std::ostream &print(std::ostream &out) const override {
     return out << "variable dereference: " << definition;
   }
   inline std::string_view getName() const noexcept override {
     return "var ref";
   }
-  virtual type_ptr getType() const noexcept override {
+  virtual TypePtr getType() const noexcept override {
     auto type = definition.getType();
-    type.is_ref = ref_types::ref;
+    type.is_ref = RefTypes::ref;
     return type;
   }
 };
-} // namespace selflang
+} // namespace self

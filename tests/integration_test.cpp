@@ -60,8 +60,8 @@ auto get_stdlib() {
 }
 int main() {
   auto stdlib = get_stdlib();
-  auto AST = selflang::lex(std::string(file));
-  auto IR = selflang::codegen(AST);
+  auto AST = self::lex(std::string(file));
+  auto IR = self::codegen(AST);
   IR->print(llvm::outs(), nullptr);
   std::error_code file_err;
   auto aout = llvm::raw_fd_ostream(path, file_err);
@@ -69,7 +69,7 @@ int main() {
     llvm::errs() << "Could not open file: " << file_err.message();
     return 1;
   }
-  selflang::compile(*IR, aout);
+  self::compile(*IR, aout);
   auto command =
       fmt::format(link_command, path, stdlib.path().c_str(), output_name);
   std::system(command.c_str());

@@ -58,9 +58,9 @@ void use_passes(llvm::Module &module, llvm::TargetMachine *target,
   dest.flush();
 }
 } // namespace
-namespace selflang {
+namespace self {
 void compile(llvm::Module &module, llvm::raw_fd_ostream &file) {
   auto target = config_module(module);
   use_passes(module, target, file);
 }
-} // namespace selflang
+} // namespace self

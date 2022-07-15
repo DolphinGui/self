@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace selflang {
+namespace self {
 template <typename Construct, typename Destruct> class scope_guard {
   Destruct d;
 
@@ -14,4 +14,4 @@ public:
   ~scope_guard() { d(); }
   static_assert(noexcept(d()), "destructor may not throw");
 };
-}; // namespace selflang
+}; // namespace self

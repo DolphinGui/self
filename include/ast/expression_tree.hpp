@@ -4,8 +4,8 @@
 
 #include "ast/expression.hpp"
 
-namespace selflang {
-struct expression_tree : public expression, public expression_list {
+namespace self {
+struct ExpressionTree : public Expression, public ExpressionList {
   inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
@@ -21,7 +21,7 @@ struct expression_tree : public expression, public expression_list {
     return result.str();
   }
 
-  virtual token_view getName() const noexcept override {
+  virtual TokenView getName() const noexcept override {
     return "expression tree";
   }
   bool isComplete() const noexcept override {
@@ -33,8 +33,8 @@ struct expression_tree : public expression, public expression_list {
   }
   void complete_types();
 };
-struct namespace_tree : expression_tree {
-  token name;
+struct namespace_tree : ExpressionTree {
+  Token name;
   inline std::ostream &print(std::ostream &out) const override {
     out << "namespace " << name << " contents:\n";
     for (const auto &e : *this) {
@@ -43,4 +43,4 @@ struct namespace_tree : expression_tree {
     return out;
   }
 };
-} // namespace selflang
+} // namespace self

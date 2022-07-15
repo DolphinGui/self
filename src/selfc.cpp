@@ -11,9 +11,9 @@ int main(int argc, char **argv) {
   parse.parse(argc, argv);
   if (!parse(1)) {
     std::cout << "no input files given\n";
-  }else{
+  } else {
     auto file = std::ifstream(parse[1]);
-    if(file.fail())
+    if (file.fail())
       throw std::runtime_error("failed to open file");
   }
 }

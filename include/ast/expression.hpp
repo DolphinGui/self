@@ -1,22 +1,31 @@
 #pragma once
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <ostream>
 #include <string_view>
 #include <vector>
 
-namespace selflang {
-using token = std::string;
-using token_view = std::string_view;
-enum struct ref_types { value, ref, ptr, any };
-class var_decl;
-template <typename T> class type_indirect {
+namespace self {
+using Token = std::string;
+using TokenView = std::string_view;
+struct Type {
+  virtual TokenView getTypename() const noexcept = 0;
+  virtual size_t getHash() const noexcept {
+    std::hash<std::string_view> hasher;
+    return hasher(getTypename());
+  }
+};
+enum struct RefTypes { value, ref, ptr, any };
+template <typename T> class TypeRefBase {
 public:
   T ptr;
   // These are qualifiers.
-  ref_types is_ref = ref_types::value;
-  friend bool operator==(type_indirect left, type_indirect right) {
-    using enum ref_types;
+  RefTypes is_ref = RefTypes::any;
+  TypeRefBase(T ptr) : ptr{ptr} {}
+  TypeRefBase(T ptr, RefTypes ref) : ptr{ptr}, is_ref(ref) {}
+  friend bool operator==(TypeRefBase left, TypeRefBase right) {
+    using enum RefTypes;
     if (!left.ptr || !right.ptr)
       return false;
     if (left.is_ref == any || right.is_ref == any) {
@@ -25,22 +34,22 @@ public:
     return left.ptr == right.ptr && left.is_ref == right.is_ref;
   }
 };
-using type_ptr = type_indirect<const var_decl *>;
-using type_ref = type_indirect<const var_decl &>;
+using TypePtr = TypeRefBase<const Type *>;
+using TypeRef = TypeRefBase<const Type &>;
 
-struct expression {
-  virtual ~expression() = default;
-  virtual bool isComplete() const { return true; };
-  friend std::ostream &operator<<(std::ostream &os, expression const &ex) {
+struct Expression {
+  virtual ~Expression() = default;
+  virtual bool isComplete() const { return true; }
+  friend std::ostream &operator<<(std::ostream &os, const Expression &ex) {
     return ex.print(os);
   }
-  virtual type_ptr getType() const noexcept { return {nullptr}; }
+  virtual TypePtr getType() const noexcept { return {nullptr}; }
   virtual std::ostream &print(std::ostream &) const = 0;
-  virtual token_view getName() const noexcept = 0;
+  virtual TokenView getName() const noexcept = 0;
 };
 
-using expression_ptr = std::unique_ptr<expression>;
-using expression_ref = std::reference_wrapper<expression>;
-using expression_const_ref = std::reference_wrapper<const expression>;
-using expression_list = std::vector<expression_ptr>;
-} // namespace selflang
+using ExpressionPtr = std::unique_ptr<Expression>;
+using ExpressionRef = std::reference_wrapper<Expression>;
+using ExpressionConstRef = std::reference_wrapper<const Expression>;
+using ExpressionList = std::vector<ExpressionPtr>;
+} // namespace self

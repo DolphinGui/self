@@ -190,8 +190,8 @@ public:
 // Parser
 //===----------------------------------------------------------------------===//
 
-/// CurTok/getNextToken - Provide a simple token buffer.  CurTok is the current
-/// token the parser is looking at.  getNextToken reads another token from the
+/// CurTok/getNextToken - Provide a simple Token buffer.  CurTok is the current
+/// token the parser is looking at.  getNextToken reads another Token from the
 /// lexer and updates CurTok with its results.
 static int CurTok;
 static int getNextToken() { return CurTok = gettok(); }
@@ -200,7 +200,7 @@ static int getNextToken() { return CurTok = gettok(); }
 /// defined.
 static std::map<char, int> BinopPrecedence;
 
-/// GetTokPrecedence - Get the precedence of the pending binary operator token.
+/// GetTokPrecedence - Get the precedence of the pending binary operator Token.
 static int GetTokPrecedence() {
   if (!isascii(CurTok))
     return -1;
@@ -288,7 +288,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
   default:
-    return LogError("unknown token when expecting an expression");
+    return LogError("unknown Token when expecting an expression");
   case tok_identifier:
     return ParseIdentifierExpr();
   case tok_number:

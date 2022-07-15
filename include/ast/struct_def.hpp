@@ -2,18 +2,19 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 
-namespace selflang {
-class var_decl;
-struct fun_def_base;
-struct struct_def : public expression {
-  struct_def() = default;
-  struct_def(struct_def &&other): body(std::move(other.body)){}
-  expression_tree body;
+namespace self {
+struct StructDef : public Expression, Type {
+  std::string identity;
+  ExpressionTree body;
+
+  StructDef() = default;
+  StructDef(StructDef &&other) : body(std::move(other.body)) {}
   std::ostream &print(std::ostream &out) const override {
     out << "struct decl: ";
     for (auto &m : body) {
@@ -21,17 +22,22 @@ struct struct_def : public expression {
     }
     return out;
   }
-  token_view getName() const noexcept override { return "struct decl"; };
+  TokenView getName() const noexcept override { return "struct decl"; }
+  TokenView getTypename() const noexcept override { return identity; }
 };
-struct opaque_struct : public expression {
-  opaque_struct(size_t size = 0) : size(size) {}
+struct OpaqueStruct : public Expression, Type {
+  OpaqueStruct(unsigned int identity, size_t size = 0)
+      : size(size),
+        identity(std::string("struct").append(std::to_string(identity))) {}
   size_t size = 0;
+  std::string identity;
   std::ostream &print(std::ostream &out) const override {
     out << "opaque struct" << size;
     if (size)
       out << " size " << size;
     return out;
   }
-  token_view getName() const noexcept override { return "opaque struct"; };
+  TokenView getName() const noexcept override { return "opaque struct"; }
+  TokenView getTypename() const noexcept override { return identity; }
 };
-} // namespace selflang
+} // namespace self

@@ -3,11 +3,11 @@
 #include <llvm/Support/raw_ostream.h>
 #include <memory>
 
-namespace selflang {
-struct var_decl;
-struct expression_tree;
+namespace self {
+struct VarDeclaration;
+struct ExpressionTree;
 void compile(llvm::Module &, llvm::raw_fd_ostream &);
 
-llvm::Type *getType(const var_decl &);
-std::unique_ptr<llvm::Module> codegen(const selflang::expression_tree &ast);
-} // namespace selflang
+llvm::Type *getType(const VarDeclaration &);
+std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast);
+} // namespace self
