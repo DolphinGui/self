@@ -9,6 +9,8 @@
 namespace self {
 
 namespace detail {
+
+enum BuiltinInstruction { call = 0, store, addi, subi, muli, divi, assign };
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }
 inline void iterate(auto lambda, auto &&arg, auto &&...args) {
   lambda(arg);
@@ -20,7 +22,7 @@ struct FunBase : public Expression {
   Token name;
   ExpressionTree body;
   TypePtr return_type = {nullptr};
-  int hash = 0;
+  detail::BuiltinInstruction internal = detail::call;
   bool member = false;
   bool body_defined = false;
 

@@ -4,3 +4,12 @@
 #include <ast/tuple.hpp>
 
 namespace {} // namespace
+
+namespace self {
+
+ExpressionPtr evaluate(ExpressionConstRef e, const SymbolMap &context) {
+  if (auto *call = dynamic_cast<const FunctionCall *>(&e.get())) {
+    // if(call.h)
+  }
+}
+} // namespace self

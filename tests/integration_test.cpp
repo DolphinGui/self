@@ -1,4 +1,5 @@
 #include "backend_config.hpp"
+#include "builtins.hpp"
 #include "lexer.hpp"
 
 #include <cstdlib>
@@ -59,9 +60,10 @@ auto get_stdlib() {
   throw std::runtime_error("libselfstd.a not found");
 }
 int main() {
+  self::Context c;
   auto stdlib = get_stdlib();
-  auto AST = self::lex(std::string(file));
-  auto IR = self::codegen(AST);
+  auto AST = self::lex(std::string(file), c);
+  auto IR = self::codegen(AST, c);
   IR->print(llvm::outs(), nullptr);
   std::error_code file_err;
   auto aout = llvm::raw_fd_ostream(path, file_err);

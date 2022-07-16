@@ -34,7 +34,8 @@
 
 namespace {
 llvm::LLVMContext context;
-llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder);
+llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
+                      self::Context &c);
 void unpackArgs(self::Expression *e, auto unary) {
   if (auto *args = dynamic_cast<self::arg_pack *>(e)) {
     for (auto &arg : args->members) {
@@ -64,31 +65,32 @@ void forEachArg(const self::FunBase *def, auto unary) {
   }
 }
 
-llvm::Type *getType(const self::Type &t) {
+llvm::Type *getType(const self::Type &t, self::Context &c) {
 
-  if (t.getTypename() == self::i64_t.value.getTypename()) {
+  if (t.getTypename() == c.i64_t.getTypename()) {
     return llvm::Type::getInt64Ty(context);
   }
-  if (t.getTypename() == self::char_t.value.getTypename()) {
+  if (t.getTypename() == c.char_t.getTypename()) {
     return llvm::Type::getInt8Ty(context);
   }
-  if (t.getTypename() == self::void_t.value.getTypename()) {
+  if (t.getTypename() == c.void_t.getTypename()) {
     return llvm::Type::getVoidTy(context);
   }
 
   throw std::runtime_error("non ints not implemented right now");
 }
-llvm::Type *getType(const self::VarDeclaration &var) {
-  return getType(*var.type_ref.ptr);
+llvm::Type *getType(const self::VarDeclaration &var, self::Context &c) {
+  return getType(*var.type_ref.ptr, c);
 }
-void generateFun(const self::FunBase *fun, llvm::Module &module) {
+void generateFun(const self::FunBase *fun, llvm::Module &module,
+                 self::Context &c) {
   std::vector<llvm::Type *> arg_types;
   arg_types.reserve(fun->argcount());
   forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
-    arg_types.push_back(getType(*a));
+    arg_types.push_back(getType(*a, c));
   });
-  auto type =
-      llvm::FunctionType::get(getType(*fun->return_type.ptr), arg_types, false);
+  auto type = llvm::FunctionType::get(getType(*fun->return_type.ptr, c),
+                                      arg_types, false);
   auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
                                        fun->getName(), module);
   if (fun->body_defined) {
@@ -96,22 +98,22 @@ void generateFun(const self::FunBase *fun, llvm::Module &module) {
     auto builder = llvm::IRBuilder<>(context);
     builder.SetInsertPoint(block);
     for (auto &a : fun->body) {
-      dispatch(a.get(), builder);
+      dispatch(a.get(), builder, c);
     }
   }
 }
 llvm::Value *generateFunCall(const self::FunctionCall &base,
-                             llvm::IRBuilder<> &builder) {
+                             llvm::IRBuilder<> &builder, self::Context &c) {
   llvm::FunctionType *type;
 
   {
     std::vector<llvm::Type *> arg_types;
     arg_types.reserve(base.definition.argcount());
     const auto arg_push = [&](const std::unique_ptr<self::VarDeclaration> &a) {
-      arg_types.push_back(getType(*a));
+      arg_types.push_back(getType(*a, c));
     };
     forEachArg(&base.definition, arg_push);
-    type = llvm::FunctionType::get(getType(*base.definition.return_type.ptr),
+    type = llvm::FunctionType::get(getType(*base.definition.return_type.ptr, c),
                                    arg_types, false);
   }
   auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
@@ -120,36 +122,36 @@ llvm::Value *generateFunCall(const self::FunctionCall &base,
   std::vector<llvm::Value *> args;
   args.reserve(base.definition.argcount());
   forEachArg(base, [&](const self::Expression &e) {
-    args.push_back(dispatch(&e, builder));
+    args.push_back(dispatch(&e, builder, c));
   });
   return builder.CreateCall(callee, args);
 }
 llvm::Value *generateCall(const self::FunctionCall &fun,
-                          llvm::IRBuilder<> &builder) {
+                          llvm::IRBuilder<> &builder, self::Context &c) {
   llvm::Value *result = nullptr;
-  switch (self::detail::BuiltinInstruction(fun.get_def().hash)) {
+  switch (self::detail::BuiltinInstruction(fun.get_def().internal)) {
   case self::detail::addi:
-    result = builder.CreateAdd(dispatch(fun.lhs.get(), builder),
-                               dispatch(fun.rhs.get(), builder));
+    result = builder.CreateAdd(dispatch(fun.lhs.get(), builder, c),
+                               dispatch(fun.rhs.get(), builder, c));
     break;
   case self::detail::store:
-    result = builder.CreateStore(dispatch(fun.rhs.get(), builder),
-                                 dispatch(fun.lhs.get(), builder));
+    result = builder.CreateStore(dispatch(fun.rhs.get(), builder, c),
+                                 dispatch(fun.lhs.get(), builder, c));
     break;
   case self::detail::subi:
-    result = builder.CreateSub(dispatch(fun.lhs.get(), builder),
-                               dispatch(fun.rhs.get(), builder));
+    result = builder.CreateSub(dispatch(fun.lhs.get(), builder, c),
+                               dispatch(fun.rhs.get(), builder, c));
     break;
   case self::detail::muli:
-    result = builder.CreateMul(dispatch(fun.lhs.get(), builder),
-                               dispatch(fun.rhs.get(), builder));
+    result = builder.CreateMul(dispatch(fun.lhs.get(), builder, c),
+                               dispatch(fun.rhs.get(), builder, c));
     break;
   case self::detail::divi:
-    result = builder.CreateSDiv(dispatch(fun.lhs.get(), builder),
-                                dispatch(fun.rhs.get(), builder));
+    result = builder.CreateSDiv(dispatch(fun.lhs.get(), builder, c),
+                                dispatch(fun.rhs.get(), builder, c));
     break;
-  case self::detail::none:
-    return generateFunCall(fun, builder);
+  case self::detail::call:
+    return generateFunCall(fun, builder, c);
     break;
   }
   return result;
@@ -181,14 +183,14 @@ llvm::Value *createString(const self::StringLit &str, llvm::Module &m) {
   return global;
 }
 
-llvm::Value *dispatch(const self::Expression *expr,
-                      llvm::IRBuilder<> &builder) {
+llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
+                      self::Context &c) {
   if (auto *fun = dynamic_cast<const self::FunctionCall *>(expr)) {
-    return generateCall(*fun, builder);
+    return generateCall(*fun, builder, c);
   } else if (auto &type = typeid(*expr); type == typeid(self::Ret)) {
     auto &ret = dynamic_cast<const self::Ret &>(*expr);
     if (ret.value) {
-      return builder.CreateRet(dispatch(ret.value.get(), builder));
+      return builder.CreateRet(dispatch(ret.value.get(), builder, c));
     } else {
       return builder.CreateRetVoid();
     }
@@ -205,7 +207,7 @@ llvm::Value *dispatch(const self::Expression *expr,
     return createString(str, *builder.GetInsertBlock()->getModule());
   } else if (type == typeid(self::VarDeclaration)) {
     auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
-    return builder.CreateAlloca(getType(var), 0, var.getName());
+    return builder.CreateAlloca(getType(var, c), 0, var.getName());
   } else {
     std::cerr << type.name() << '\n';
     throw std::runtime_error("I dont know what type this is\n");
@@ -215,7 +217,8 @@ llvm::Value *dispatch(const self::Expression *expr,
 } // namespace
 
 namespace self {
-std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast) {
+std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast,
+                                      Context &c) {
   auto module = std::make_unique<llvm::Module>(
       "todo: make module name meaningful", context);
   for (auto &expr : ast) { // clang-format off
@@ -226,7 +229,7 @@ std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast) {
             dynamic_cast<self::FunBase *>(expr.get())) { // clang-format off
     #pragma clang diagnostic pop
       // clang-format on
-      generateFun(FunctionDef, *module);
+      generateFun(FunctionDef, *module, c);
     } else {
       throw std::runtime_error("unimplemented");
     }

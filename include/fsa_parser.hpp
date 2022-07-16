@@ -4,6 +4,6 @@
 #include "lexer.hpp"
 
 namespace self {
-ExpressionTree parse(TokenVec in);
+ExpressionTree parse(TokenVec in, Context& c);
 
 }

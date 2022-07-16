@@ -49,5 +49,6 @@ using ExpressionPtr = std::unique_ptr<Expression>;
 using ExpressionRef = std::reference_wrapper<Expression>;
 using ExpressionConstRef = std::reference_wrapper<const Expression>;
 using ExpressionList = std::vector<ExpressionPtr>;
-
+using SymbolMap = std::unordered_multimap<self::TokenView, ExpressionConstRef>;
+ExpressionPtr evaluate(ExpressionConstRef, const SymbolMap &);
 } // namespace self

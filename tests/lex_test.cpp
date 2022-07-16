@@ -3,6 +3,7 @@
 #include <sstream>
 #include <string_view>
 
+#include "builtins.hpp"
 #include "lexer.hpp"
 using namespace std::string_view_literals;
 constexpr auto deref = "var a = 5; var b = a"sv;
@@ -15,10 +16,11 @@ constexpr auto nesting = "var a = struct{fun a()->i64{return 22;}}"sv;
 // constexpr auto tuple = "var b = (5 - 2 + 2, \"3\", '3')"sv;
 int main() {
   uint count = 0;
+  self::Context c;
   for (const auto &file : {struct_test, deref, nesting, VarDeclaration, expr,
                            FunctionDef, foward_decl}) {
     fmt::print("Test {}:\n", count++);
-    auto results = self::lex(std::string(file));
+    auto results = self::lex(std::string(file), c);
     for (auto &ex : results) {
       std::cout << *ex << '\n';
     }
