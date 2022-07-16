@@ -6,29 +6,42 @@
 #include "ast/variables.hpp"
 #include <cstddef>
 #include <functional>
+#include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 namespace self {
 namespace detail {
 constexpr auto ctr_lambda = [](auto in, int hash) {
   in.hash = hash;
   return in;
 };
-enum BuiltinInstruction { none = 0, store, addi, subi, muli, divi };
+enum BuiltinInstruction { none = 0, store, addi, subi, muli, divi, assign };
 } // namespace detail
 struct TypeType : Type {
   TokenView name;
   TypeType(TokenView n) : name(n) {}
   TokenView getTypename() const noexcept override { return name; }
+  bool operator==(const TypeType &other) const noexcept {
+    return name == other.name;
+  }
 };
 const inline auto type_inst = TypeType("type");
-const inline auto i64_t =
-    Literal<TypeType>(TypeType("i64"), TypeRef{type_inst});
-const inline auto char_t =
-    Literal<TypeType>(TypeType("char"), TypeRef{type_inst});
-const inline auto f64_t =
-    Literal<TypeType>(TypeType("f64"), TypeRef{type_inst});
-const inline auto void_t =
-    Literal<TypeType>(TypeType("void"), TypeRef{type_inst});
+
+struct BuiltinTypeLit : public Literal<TypeType> {
+  // I really need to create a global object
+  static inline std::unordered_map<TokenView, const BuiltinTypeLit *>
+      internal_type_map;
+  BuiltinTypeLit(TypeType val) : Literal(val, TypeRef{type_inst}) {
+    internal_type_map.insert({this->value.name, this});
+  }
+  static bool contains(TokenView t) { return internal_type_map.contains(t); }
+  static BuiltinTypeLit get(TokenView t) { return *internal_type_map.at(t); }
+};
+const inline auto type_t = BuiltinTypeLit(TypeType("type"));
+const inline auto i64_t = BuiltinTypeLit(TypeType("i64"));
+const inline auto char_t = BuiltinTypeLit(TypeType("char"));
+const inline auto f64_t = BuiltinTypeLit(TypeType("f64"));
+const inline auto void_t = BuiltinTypeLit(TypeType("void"));
 
 const inline auto i64_assignment = detail::ctr_lambda(
     OperatorDef("=", i64_t.value,
@@ -72,6 +85,18 @@ struct StructLit : public Literal<StructDef> {
 struct OpaqueLit : public Literal<OpaqueStruct> {
   OpaqueLit(OpaqueStruct &&val) : Literal(std::move(val), type_inst) {}
 };
+
+inline TypeRef getLiteralType(const Expression &e) {
+  if (auto *builtin = dynamic_cast<const BuiltinTypeLit *>(&e)) {
+    return builtin->value;
+  } else if (auto *structural = dynamic_cast<const StructLit *>(&e)) {
+    return structural->value;
+  } else if (auto *opaque = dynamic_cast<const OpaqueLit *>(&e)) {
+    return opaque->value;
+  } else
+    throw std::runtime_error("That's not a type expression");
+}
+
 using TokenView = std::string_view;
 template <> struct Literal<std::vector<unsigned char>> : public Expression {
   std::vector<unsigned char> value;

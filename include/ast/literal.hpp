@@ -31,6 +31,10 @@ template <typename T> struct Literal : public Expression {
   TypePtr getType() const noexcept override {
     return TypePtr(&type.ptr, RefTypes::value);
   }
+  bool isCompiletime() const noexcept override { return true; }
+  bool operator==(const Literal &other) const noexcept {
+    return other.value == value;
+  }
 };
 
 } // namespace self

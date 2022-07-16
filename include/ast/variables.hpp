@@ -11,6 +11,7 @@ class VarDeclaration : public Expression {
 
 public:
   TypePtr type_ref;
+  Expression *value;
   VarDeclaration(TokenView name) : name(name), type_ref{nullptr} {}
   VarDeclaration(TokenView name, TypeRef type)
       : name(name), type_ref{&type.ptr, type.is_ref} {}

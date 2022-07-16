@@ -40,25 +40,25 @@ public:
 
 class OperatorDef : public FunBase {
 public:
-  std::unique_ptr<VarDeclaration> LHS;
-  std::unique_ptr<VarDeclaration> RHS;
+  std::unique_ptr<VarDeclaration> lhs;
+  std::unique_ptr<VarDeclaration> rhs;
   OperatorDef(TokenView name, TypeRef return_type,
               std::unique_ptr<VarDeclaration> &&LHS,
               std::unique_ptr<VarDeclaration> &&RHS, bool member = false)
-      : FunBase(name, return_type, member), LHS(std::move(LHS)),
-        RHS(std::move(RHS)) {}
+      : FunBase(name, return_type, member), lhs(std::move(LHS)),
+        rhs(std::move(RHS)) {}
   std::size_t argcount() const noexcept override {
-    if (!LHS || !RHS)
+    if (!lhs || !rhs)
       return 1;
     return 2;
   }
   std::ostream &print(std::ostream &out) const override {
     out << "operator " << name << "( ";
-    if (LHS) {
-      out << *LHS << ", ";
+    if (lhs) {
+      out << *lhs << ", ";
     }
-    if (RHS) {
-      out << *RHS;
+    if (rhs) {
+      out << *rhs;
     }
     out << ')';
     if (return_type.ptr) {
@@ -101,24 +101,24 @@ struct FunctionDef : public FunBase {
 class FunctionCall : public Expression {
 public:
   const FunBase &definition;
-  ExpressionPtr LHS;
-  ExpressionPtr RHS;
+  ExpressionPtr lhs;
+  ExpressionPtr rhs;
   FunctionCall(const FunBase &Callee) : definition(Callee) {}
   FunctionCall(const FunBase &callee, ExpressionPtr &&LHS, ExpressionPtr &&RHS)
-      : definition(callee), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+      : definition(callee), lhs(std::move(LHS)), rhs(std::move(RHS)) {}
   inline std::ostream &print(std::ostream &out) const override {
-    if (LHS)
-      out << *LHS << ' ';
+    if (lhs)
+      out << *lhs << ' ';
     out << definition.getName() << ' ';
-    if (RHS)
-      out << *RHS;
+    if (rhs)
+      out << *rhs;
     return out;
   }
   bool isComplete() const noexcept override {
-    if (!LHS && !RHS)
+    if (!lhs && !rhs)
       return false;
     std::size_t count;
-    if (!LHS || !RHS)
+    if (!lhs || !rhs)
       count = 1;
     else
       count = 2;
@@ -126,9 +126,9 @@ public:
   }
   const FunBase &get_def() const noexcept { return definition; }
   TokenView getName() const noexcept override { return "op call"; }
-  bool isUnaryPre() const noexcept { return !LHS && RHS; }
-  bool isUnaryPost() const noexcept { return LHS && !RHS; }
-  bool isBinary() const noexcept { return LHS && RHS; }
+  bool isUnaryPre() const noexcept { return !lhs && rhs; }
+  bool isUnaryPost() const noexcept { return lhs && !rhs; }
+  bool isBinary() const noexcept { return lhs && rhs; }
   bool isUnary() const noexcept { return !isBinary(); }
   virtual TypePtr getType() const noexcept override {
     return definition.return_type;

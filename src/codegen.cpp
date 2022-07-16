@@ -46,10 +46,10 @@ void unpackArgs(self::Expression *e, auto unary) {
 }
 void forEachArg(const self::FunctionCall &base, auto unary) {
   if (base.isBinary()) {
-    unpackArgs(base.LHS.get(), unary);
-    unpackArgs(base.RHS.get(), unary);
+    unpackArgs(base.lhs.get(), unary);
+    unpackArgs(base.rhs.get(), unary);
   } else if (base.isUnaryPre()) {
-    unpackArgs(base.RHS.get(), unary);
+    unpackArgs(base.rhs.get(), unary);
   } else {
     throw std::runtime_error("unimplemented");
   }
@@ -59,27 +59,23 @@ void forEachArg(const self::FunBase *def, auto unary) {
     std::for_each(fun->arguments.begin(), fun->arguments.end(), unary);
   } else {
     auto &op = dynamic_cast<const self::OperatorDef &>(*def);
-    unary(op.LHS);
-    unary(op.RHS);
+    unary(op.lhs);
+    unary(op.rhs);
   }
 }
 
 llvm::Type *getType(const self::Type &t) {
-  if (&t != &self::type_inst) {
-    // return var.type_ref.ptr->
-    throw std::runtime_error("non ints not implemented right now");
 
-  } else {
-    if (&t == &self::i64_t.value) {
-      return llvm::Type::getInt64Ty(context);
-    }
-    if (&t == &self::char_t.value) {
-      return llvm::Type::getInt8Ty(context);
-    }
-    if (&t == &self::void_t.value) {
-      return llvm::Type::getVoidTy(context);
-    }
+  if (t.getTypename() == self::i64_t.value.getTypename()) {
+    return llvm::Type::getInt64Ty(context);
   }
+  if (t.getTypename() == self::char_t.value.getTypename()) {
+    return llvm::Type::getInt8Ty(context);
+  }
+  if (t.getTypename() == self::void_t.value.getTypename()) {
+    return llvm::Type::getVoidTy(context);
+  }
+
   throw std::runtime_error("non ints not implemented right now");
 }
 llvm::Type *getType(const self::VarDeclaration &var) {
@@ -105,7 +101,7 @@ void generateFun(const self::FunBase *fun, llvm::Module &module) {
   }
 }
 llvm::Value *generateFunCall(const self::FunctionCall &base,
-                      llvm::IRBuilder<> &builder) {
+                             llvm::IRBuilder<> &builder) {
   llvm::FunctionType *type;
 
   {
@@ -133,24 +129,24 @@ llvm::Value *generateCall(const self::FunctionCall &fun,
   llvm::Value *result = nullptr;
   switch (self::detail::BuiltinInstruction(fun.get_def().hash)) {
   case self::detail::addi:
-    result = builder.CreateAdd(dispatch(fun.LHS.get(), builder),
-                               dispatch(fun.RHS.get(), builder));
+    result = builder.CreateAdd(dispatch(fun.lhs.get(), builder),
+                               dispatch(fun.rhs.get(), builder));
     break;
   case self::detail::store:
-    result = builder.CreateStore(dispatch(fun.RHS.get(), builder),
-                                 dispatch(fun.LHS.get(), builder));
+    result = builder.CreateStore(dispatch(fun.rhs.get(), builder),
+                                 dispatch(fun.lhs.get(), builder));
     break;
   case self::detail::subi:
-    result = builder.CreateSub(dispatch(fun.LHS.get(), builder),
-                               dispatch(fun.RHS.get(), builder));
+    result = builder.CreateSub(dispatch(fun.lhs.get(), builder),
+                               dispatch(fun.rhs.get(), builder));
     break;
   case self::detail::muli:
-    result = builder.CreateMul(dispatch(fun.LHS.get(), builder),
-                               dispatch(fun.RHS.get(), builder));
+    result = builder.CreateMul(dispatch(fun.lhs.get(), builder),
+                               dispatch(fun.rhs.get(), builder));
     break;
   case self::detail::divi:
-    result = builder.CreateSDiv(dispatch(fun.LHS.get(), builder),
-                                dispatch(fun.RHS.get(), builder));
+    result = builder.CreateSDiv(dispatch(fun.lhs.get(), builder),
+                                dispatch(fun.rhs.get(), builder));
     break;
   case self::detail::none:
     return generateFunCall(fun, builder);
@@ -215,8 +211,6 @@ llvm::Value *dispatch(const self::Expression *expr,
     throw std::runtime_error("I dont know what type this is\n");
   }
 }
-
-
 
 } // namespace
 

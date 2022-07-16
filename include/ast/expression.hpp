@@ -11,10 +11,6 @@ using Token = std::string;
 using TokenView = std::string_view;
 struct Type {
   virtual TokenView getTypename() const noexcept = 0;
-  virtual size_t getHash() const noexcept {
-    std::hash<std::string_view> hasher;
-    return hasher(getTypename());
-  }
 };
 enum struct RefTypes { value, ref, ptr, any };
 template <typename T> class TypeRefBase {
@@ -40,16 +36,18 @@ using TypeRef = TypeRefBase<const Type &>;
 struct Expression {
   virtual ~Expression() = default;
   virtual bool isComplete() const { return true; }
+  virtual TypePtr getType() const noexcept { return {nullptr}; }
+  virtual std::ostream &print(std::ostream &) const = 0;
   friend std::ostream &operator<<(std::ostream &os, const Expression &ex) {
     return ex.print(os);
   }
-  virtual TypePtr getType() const noexcept { return {nullptr}; }
-  virtual std::ostream &print(std::ostream &) const = 0;
   virtual TokenView getName() const noexcept = 0;
+  virtual bool isCompiletime() const noexcept { return false; }
 };
 
 using ExpressionPtr = std::unique_ptr<Expression>;
 using ExpressionRef = std::reference_wrapper<Expression>;
 using ExpressionConstRef = std::reference_wrapper<const Expression>;
 using ExpressionList = std::vector<ExpressionPtr>;
+
 } // namespace self
