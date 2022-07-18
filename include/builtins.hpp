@@ -5,12 +5,14 @@
 #include "ast/struct_def.hpp"
 #include "ast/variables.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 namespace self {
 namespace detail {
 constexpr auto ctr_lambda = [](auto &&in, detail::BuiltinInstruction hash) {
@@ -42,6 +44,7 @@ struct Context {
   const TypeType char_t = TypeType("char");
   const TypeType f64_t = TypeType("f64");
   const TypeType void_t = TypeType("void");
+  const TypeType str_t = TypeType("str");
   std::unordered_map<TokenView, BuiltinTypeRef> internal_type_map;
 
   const OperatorDef i64_assignment = detail::ctr_lambda(
@@ -70,9 +73,9 @@ struct Context {
                   VarDeclarationPtr("this", TypeRef(type_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", type_t), true);
 };
-struct BuiltinTypeLit : public Literal<BuiltinTypeRef> {
+struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
   // I really need to create a global object
-  BuiltinTypeLit(BuiltinTypeRef val, Context &c) : Literal(val, c.type_t) {}
+  BuiltinTypeLit(BuiltinTypeRef val, Context &c) : LiteralImpl(val, c.type_t) {}
 
   static bool contains(TokenView t, Context &c) {
     return c.internal_type_map.contains(t);
@@ -80,24 +83,55 @@ struct BuiltinTypeLit : public Literal<BuiltinTypeRef> {
   static BuiltinTypeLit get(TokenView t, Context &c) {
     return {c.internal_type_map.at(t), c};
   }
+
+  ExpressionPtr clone() const override {
+    return std::make_unique<BuiltinTypeLit>(*this);
+  }
 };
-struct IntLit : public Literal<size_t> {
-  IntLit(size_t val, Context &c) : Literal(val, c.i64_t) {}
+struct IntLit : public LiteralImpl<size_t, IntLit> {
+  IntLit(size_t val, Context &c) : LiteralImpl(val, c.i64_t) {}
 };
-struct CharLit : public Literal<unsigned char> {
-  CharLit(unsigned char val, Context &c) : Literal(val, c.char_t) {}
+struct CharLit : public LiteralImpl<unsigned char, CharLit> {
+  CharLit(unsigned char val, Context &c) : LiteralImpl(val, c.char_t) {}
 };
-struct FloatLit : public Literal<double> {
-  FloatLit(double val, Context &c) : Literal(val, c.f64_t) {}
+struct FloatLit : public LiteralImpl<double, FloatLit> {
+  FloatLit(double val, Context &c) : LiteralImpl(val, c.f64_t) {}
 };
-struct StructLit : public Literal<StructDef> {
-  StructLit(StructDef &&val, Context &c) : Literal(std::move(val), c.type_t) {}
+struct StructLit : public LiteralImpl<StructDef, StructLit> {
+  StructLit(StructDef &&val, Context &c)
+      : LiteralImpl(std::move(val), c.type_t) {}
 };
-struct OpaqueLit : public Literal<OpaqueStruct> {
+struct OpaqueLit : public LiteralImpl<OpaqueStruct, OpaqueLit> {
   OpaqueLit(OpaqueStruct &&val, Context &c)
-      : Literal(std::move(val), c.type_t) {}
+      : LiteralImpl(std::move(val), c.type_t) {}
 };
 
+struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
+  StringLit(std::string_view s, Context &c)
+      : LiteralImpl(string_converter(s), c.str_t) {}
+
+  inline std::ostream &printval(std::ostream &out) const {
+    out << "Literal: \"";
+    for (char c : value) {
+      out << c;
+    }
+    return out << '\"';
+  }
+
+  inline TokenView getName() const noexcept override {
+    return "Literal string";
+  };
+
+private:
+  static constexpr auto string_converter =
+      [](std::string_view s) -> std::vector<unsigned char> {
+    std::vector<unsigned char> result;
+    result.reserve(s.size());
+    std::for_each(s.cbegin(), s.cend(), [&](char c) { result.push_back(c); });
+    return result;
+  };
+};
+// using StringLit = LiteralImpl<std::vector<unsigned char>>;
 inline TypeRef getLiteralType(const Expression &e) {
   if (auto *builtin = dynamic_cast<const BuiltinTypeLit *>(&e)) {
     return builtin->value.get();
@@ -108,23 +142,5 @@ inline TypeRef getLiteralType(const Expression &e) {
   } else
     throw std::runtime_error("That's not a type expression");
 }
-
-using TokenView = std::string_view;
-template <> struct Literal<std::vector<unsigned char>> : public Expression {
-  std::vector<unsigned char> value;
-  Literal(std::vector<unsigned char> itself) : value(itself){};
-  inline std::ostream &print(std::ostream &out) const override {
-    out << "Literal: \"";
-    for (char c : value) {
-      out << c;
-    }
-    return out << '\"';
-  }
-  inline TokenView getName() const noexcept override {
-    return "Literal value";
-  };
-};
-
-using StringLit = Literal<std::vector<unsigned char>>;
 
 } // namespace self

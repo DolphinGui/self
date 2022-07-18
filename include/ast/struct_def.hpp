@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -14,7 +15,11 @@ struct StructDef : public Expression, Type {
   ExpressionTree body;
 
   StructDef() = default;
-  StructDef(StructDef &&other) : body(std::move(other.body)) {}
+  StructDef(StructDef &&) = default;
+  StructDef(const StructDef &other) : identity(other.identity) {
+    std::for_each(other.body.cbegin(), other.body.cend(),
+                  [&](const ExpressionPtr &e) { body.push_back(e->clone()); });
+  }
   std::ostream &print(std::ostream &out) const override {
     out << "struct decl: ";
     for (auto &m : body) {
@@ -24,6 +29,10 @@ struct StructDef : public Expression, Type {
   }
   TokenView getName() const noexcept override { return "struct decl"; }
   TokenView getTypename() const noexcept override { return identity; }
+
+  ExpressionPtr clone() const override {
+    return std::make_unique<StructDef>(*this);
+  }
 };
 struct OpaqueStruct : public Expression, Type {
   OpaqueStruct(unsigned int identity, size_t size = 0)
@@ -39,5 +48,8 @@ struct OpaqueStruct : public Expression, Type {
   }
   TokenView getName() const noexcept override { return "opaque struct"; }
   TokenView getTypename() const noexcept override { return identity; }
+  ExpressionPtr clone() const override {
+    return std::make_unique<OpaqueStruct>(*this);
+  }
 };
 } // namespace self

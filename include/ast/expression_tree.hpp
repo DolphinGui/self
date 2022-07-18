@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <memory>
 #include <sstream>
 
 #include "ast/expression.hpp"
@@ -32,6 +34,12 @@ struct ExpressionTree : public Expression, public ExpressionList {
     return true;
   }
   void complete_types();
+  ExpressionPtr clone() const override {
+    auto t = std::make_unique<ExpressionTree>();
+    std::for_each(this->cbegin(), this->cend(),
+                  [&](const ExpressionPtr &p) { t->push_back(p->clone()); });
+    return t;
+  }
 };
 struct namespace_tree : ExpressionTree {
   Token name;

@@ -52,8 +52,8 @@ add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
 target_link_libraries(selfparse PUBLIC re2::re2 selfast)
-# target_compile_options(selfparse PUBLIC -fsanitize=address)
-# target_link_options(selfparse PUBLIC -fsanitize=address)
+target_compile_options(selfparse PUBLIC -fsanitize=address)
+target_link_options(selfparse PUBLIC -fsanitize=address)
 # For now I haven't been having mem leak issues, and the
 # indirect leak warnings from llvm have been pretty annoying.
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)
@@ -91,6 +91,10 @@ target_link_libraries(IR_test ${llvm_libs} fmt::fmt)
 add_executable(integration_test ${CMAKE_SOURCE_DIR}/tests/integration_test.cpp)
 set_property(TARGET integration_test PROPERTY CXX_STANDARD 20)
 target_link_libraries(integration_test selfparse selfgen fmt::fmt)
+
+add_executable(exprfoldtest ${CMAKE_SOURCE_DIR}/tests/exprfolding.cpp)
+set_property(TARGET exprfoldtest PROPERTY CXX_STANDARD 20)
+target_link_libraries(exprfoldtest selfparse selfgen fmt::fmt)
 
 add_executable(cstd_test ${CMAKE_SOURCE_DIR}/tests/cstd_test.c)
 target_link_libraries(cstd_test selfstd)

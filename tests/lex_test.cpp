@@ -17,7 +17,7 @@ constexpr auto nesting = "var a = struct{fun a()->i64{return 22;}}"sv;
 int main() {
   uint count = 0;
   self::Context c;
-  for (const auto &file : {struct_test, deref, nesting, VarDeclaration, expr,
+  for (const auto &file : {expr, deref, struct_test, nesting, VarDeclaration,
                            FunctionDef, foward_decl}) {
     fmt::print("Test {}:\n", count++);
     auto results = self::lex(std::string(file), c);

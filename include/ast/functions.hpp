@@ -3,6 +3,7 @@
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 #include "ast/variables.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <memory>
 
@@ -71,6 +72,11 @@ public:
     }
     return out;
   }
+  ExpressionPtr clone() const override {
+    return std::make_unique<OperatorDef>(
+        this->getName(), TypePtr(this->return_type), this->lhs->cloneVar(),
+        this->rhs->cloneVar());
+  }
 };
 
 struct FunctionDef : public FunBase {
@@ -82,6 +88,14 @@ struct FunctionDef : public FunBase {
     arguments.reserve(sizeof...(args));
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
+  }
+  FunctionDef(const FunctionDef &other)
+      : FunBase(other.getName(), other.member) {
+    std::for_each(other.arguments.cbegin(), other.arguments.cend(),
+                  [&](const auto &o) { arguments.push_back(o->cloneVar()); });
+  }
+  ExpressionPtr clone() const override {
+    return std::make_unique<FunctionDef>(*this);
   }
   std::size_t argcount() const noexcept override { return arguments.size(); }
   std::ostream &print(std::ostream &out) const override {
@@ -108,6 +122,9 @@ public:
   FunctionCall(const FunBase &Callee) : definition(Callee) {}
   FunctionCall(const FunBase &callee, ExpressionPtr &&LHS, ExpressionPtr &&RHS)
       : definition(callee), lhs(std::move(LHS)), rhs(std::move(RHS)) {}
+  FunctionCall(const FunctionCall &other)
+      : definition(other.definition), lhs(other.lhs->clone()),
+        rhs(other.rhs->clone()) {}
   inline std::ostream &print(std::ostream &out) const override {
     if (lhs)
       out << *lhs << ' ';
@@ -134,6 +151,9 @@ public:
   bool isUnary() const noexcept { return !isBinary(); }
   virtual TypePtr getType() const noexcept override {
     return definition.return_type;
+  }
+  ExpressionPtr clone() const override {
+    return std::make_unique<FunctionCall>(*this);
   }
 };
 } // namespace self

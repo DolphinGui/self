@@ -2,6 +2,7 @@
 
 #include "expression.hpp"
 #include "expression_tree.hpp"
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -9,6 +10,10 @@ namespace self {
 struct Tuple : public Expression {
   Tuple() = default;
   Tuple(ExpressionTree &&contents) : members(std::move(contents)) {}
+  Tuple(const Tuple &other) {
+    std::for_each(other.members.cbegin(), other.members.cend(),
+                  [&](const auto &e) { members.push_back(e->clone()); });
+  }
   ExpressionTree members;
   std::ostream &print(std::ostream &out) const override {
     out << '(';
@@ -17,7 +22,10 @@ struct Tuple : public Expression {
     }
     return out << ')';
   }
-  TokenView getName() const noexcept override { return "tuple"; };
+  TokenView getName() const noexcept override { return "tuple"; }
+  ExpressionPtr clone() const override {
+    return std::make_unique<Tuple>(*this);
+  }
 };
 struct arg_pack : public Tuple {
   arg_pack() = default;
