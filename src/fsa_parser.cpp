@@ -149,7 +149,8 @@ struct GlobalParser {
     return processSubtrees(tree, tree.begin(), tree.end());
   }
 
-  void processTuples(self::ExpressionTree &tree, self::SymbolMap &context) {
+  void processTuples(self::ExpressionTree &tree, self::SymbolMap &context,
+                     self::SymbolMap &global) {
     size_t size = 0;
     auto tuple = std::make_unique<self::Tuple>();
     auto mark = tree.begin();
@@ -165,7 +166,8 @@ struct GlobalParser {
         if (branch.size() > 1) {
           tuple->members.emplace_back(evaluateTree(branch, context));
         } else {
-          tuple->members.emplace_back(parseSymbol(branch.back()));
+          tuple->members.emplace_back(
+              parseSymbol(branch.back(), context, global));
         }
         size = 0;
       }
@@ -174,7 +176,7 @@ struct GlobalParser {
       if (tree.size() > 1) {
         tuple->members.emplace_back(evaluateTree(tree, context));
       } else {
-        tuple->members.emplace_back(parseSymbol(tree.back()));
+        tuple->members.emplace_back(parseSymbol(tree.back(), context, global));
         tree.pop_back();
       }
       tuple->members.shrink_to_fit();
@@ -277,42 +279,21 @@ struct GlobalParser {
       }
     }
   };
-
   self::ExpressionPtr evaluateTree(self::ExpressionTree &tree,
-                                   self::SymbolMap &context) {
+                                   self::SymbolMap &local) {
     if (tree.empty()) {
       return std::make_unique<self::Tuple>();
-    }
-    for (auto &ptr : tree) {
-      if (auto *uneval =
-              dynamic_cast<self::UnevaluatedExpression *>(ptr.get())) {
-        auto candidates =
-            self::pair_range(context.equal_range(uneval->getToken()));
-        int count = 0;
-        const self::VarDeclaration *result;
-        for (const auto &c : candidates) {
-          if (auto *var =
-                  dynamic_cast<const self::VarDeclaration *>(&c.second.get())) {
-            ++count;
-            result = var;
-          }
-        }
-        if (count != 0) {
-          errReport(count == 1, "ambiguous variable dereference");
-          ptr = std::make_unique<self::VarDeref>(*result);
-        }
-      }
     }
     processSubtrees(tree);
     for (auto &ptr : tree) {
       if (auto *uneval = dynamic_cast<self::ExpressionTree *>(ptr.get())) {
-        ptr = evaluateTree(*uneval, context);
+        ptr = evaluateTree(*uneval, local);
       }
     }
-
-    processTuples(tree, context);
+    auto a = tree.dump();
+    processTuples(tree, local, global);
     for (auto &ptr : tree) {
-      ptr = parseSymbol(ptr);
+      ptr = parseSymbol(ptr, local, global);
     } // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -340,7 +321,7 @@ struct GlobalParser {
             for_tuple(rhs.get(), [&]{
               return fun.arguments.at(i++)->getDecltype();},
               [](self::Expression& e, auto type){coerceType(&e, type);});
-          }, context);
+          }, local);
     }
     #pragma clang diagnostic pop // clang-format on
 
@@ -381,7 +362,7 @@ struct GlobalParser {
             tree.erase(rhs);
             it = tree.erase(lhs);
           },
-          binInsert, bin_coerce, context);
+          binInsert, bin_coerce, local);
     }
 
     // right-left associative pass
@@ -392,16 +373,16 @@ struct GlobalParser {
             tree.erase(rhs.base());
             it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
           },
-          binInsert, bin_coerce, context);
+          binInsert, bin_coerce, local);
     }
-
     errReport(tree.size() == 1, "tree is not fully resolved");
-    auto last = self::ExpressionPtr(std::move(tree.back()));
-    tree.pop_back();
-    return last;
+    auto result = self::folder(std::move(tree.back()), local, global, c).first;
+    return std::move(result);
   }
 
-  self::ExpressionPtr parseSymbol(self::ExpressionPtr &base) {
+  self::ExpressionPtr parseSymbol(self::ExpressionPtr &base,
+                                  self::SymbolMap &local,
+                                  self::SymbolMap &global) {
     if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(base.get());
         maybe && !maybe->isComplete()) {
       auto t = maybe->getToken();
@@ -412,13 +393,23 @@ struct GlobalParser {
         return std::make_unique<self::CharLit>(ch, c);
 
       } else if (auto [result, str] = isStr(t); result) {
-        std::vector<unsigned char> value;
-        value.reserve(str.size() - 1);
-        std::copy(str.begin(), str.end() - 1, std::back_inserter(value));
-        return std::make_unique<self::StringLit>(value);
+        return std::make_unique<self::StringLit>(str, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
         return std::make_unique<self::BuiltinTypeLit>(
             self::BuiltinTypeLit::get(t, c));
+      } else if (auto varname = self::VarDeclaration::mangle(t);
+                 local.contains(varname)) {
+        errReport(local.count(varname) == 1,
+                  "ODR var declaration rule violated");
+        return std::make_unique<self::VarDeref>(
+            dynamic_cast<const self::VarDeclaration &>(
+                local.find(varname)->second.get()));
+      } else if (global.contains(varname)) {
+        errReport(global.count(varname) == 1,
+                  "ODR var declaration rule violated");
+        return std::make_unique<self::VarDeref>(
+            dynamic_cast<const self::VarDeclaration &>(
+                global.find(varname)->second.get()));
       }
     }
     return std::move(base);
@@ -433,20 +424,19 @@ struct GlobalParser {
   self::ExpressionPtr parseExpr(TokenIt &t, self::SymbolMap &context,
                                 callback start = nullptr,
                                 conditional endExpr = isEndl) {
-    auto tree = std::make_unique<self::ExpressionTree>();
+    self::ExpressionTree tree;
     if (start) {
-      start(*tree);
+      start(tree);
     }
     while (!endExpr(*t)) {
       if (*t == self::reserved::struct_t) {
-        tree->push_back(parseStruct(++t));
+        tree.push_back(parseStruct(++t));
       } else if (*t == self::reserved::var_t) {
       } else {
-        tree->push_back(std::make_unique<self::UnevaluatedExpression>(*t++));
+        tree.push_back(std::make_unique<self::UnevaluatedExpression>(*t++));
       }
     }
-    auto result = evaluateTree(*tree, context);
-    return result;
+    return evaluateTree(tree, context);
   }
 
   self::ExpressionPtr parseVar(TokenIt &t, self::TokenView name,

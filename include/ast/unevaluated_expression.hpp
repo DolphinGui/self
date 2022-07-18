@@ -18,5 +18,9 @@ public:
   virtual TokenView getName() const noexcept override {
     return "unevaluated expression";
   }
+
+  ExpressionPtr clone() const override {
+    return std::make_unique<UnevaluatedExpression>(*this);
+  }
 };
 } // namespace self
