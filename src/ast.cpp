@@ -48,17 +48,11 @@ folder(ExpressionPtr &&e, SymbolMap &local, SymbolMap &global, Context &c) {
       return {std::move(f), Unresolved};
     }
     case detail::addi:
-      return doIntOp(std::move(f),
-                     [](size_t lhs, size_t rhs) { return lhs + rhs; });
     case detail::subi:
-      return doIntOp(std::move(f),
-                     [](size_t lhs, size_t rhs) { return lhs - rhs; });
     case detail::muli:
-      return doIntOp(std::move(f),
-                     [](size_t lhs, size_t rhs) { return lhs * rhs; });
     case detail::divi:
-      return doIntOp(std::move(f),
-                     [](size_t lhs, size_t rhs) { return lhs / rhs; });
+      // not sure if there's a point to folding constant arithmetic
+      return {std::move(f), Unresolved};
     }
   } else if (auto *deref = dynamic_cast<VarDeref *>(e.get())) {
     auto result = local.find(deref->getName());
