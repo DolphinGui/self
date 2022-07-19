@@ -4,5 +4,5 @@
 #include <istream>
 namespace self {
 using TokenVec = std::vector<Token>;
-ExpressionTree lex(std::string in, Context& c);
+ExprTree lex(std::string in, Context& c);
 } // namespace self

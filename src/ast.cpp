@@ -9,7 +9,7 @@
 #include <stdexcept>
 
 namespace {
-std::optional<self::ExpressionConstRef> searchAll(const self::SymbolMap &local,
+std::optional<self::ExprConstRef> searchAll(const self::SymbolMap &local,
                                                   const self::SymbolMap &global,
                                                   self::TokenView key) {
   auto a = local.find(key);
@@ -25,8 +25,8 @@ std::optional<self::ExpressionConstRef> searchAll(const self::SymbolMap &local,
 
 namespace self {
 
-std::pair<ExpressionPtr, FullyResolved>
-foldExpr(ExpressionPtr &&e, SymbolMap &local, SymbolMap &global) {
+std::pair<ExprPtr, FullyResolved>
+foldExpr(ExprPtr &&e, SymbolMap &local, SymbolMap &global) {
   using enum FullyResolved;
   if (auto *call = dynamic_cast<FunctionCall *>(e.get())) {
     auto f = std::unique_ptr<FunctionCall>(

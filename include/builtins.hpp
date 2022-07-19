@@ -86,7 +86,7 @@ struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
     return result;
   }
 
-  ExpressionPtr clone() const override {
+  ExprPtr clone() const override {
     return std::make_unique<BuiltinTypeLit>(*this);
   }
   inline void printval(std::ostream &out) const {

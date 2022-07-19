@@ -39,7 +39,7 @@ auto Token_parse(std::string whole) {
 
 } // namespace
 namespace self {
-ExpressionTree lex(std::string in, Context &c) {
+ExprTree lex(std::string in, Context &c) {
   return parse(Token_parse(preprocess(in)), c);
   using namespace std::literals;
 }

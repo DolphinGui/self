@@ -12,13 +12,13 @@
 namespace self {
 struct StructDef : public ExprImpl<StructDef>, Type {
   std::string identity;
-  ExpressionTree body;
+  ExprTree body;
 
   StructDef() = default;
   StructDef(StructDef &&) = default;
   StructDef(const StructDef &other) : identity(other.identity) {
     std::for_each(other.body.cbegin(), other.body.cend(),
-                  [&](const ExpressionPtr &e) { body.push_back(e->clone()); });
+                  [&](const ExprPtr &e) { body.push_back(e->clone()); });
   }
   std::ostream &print(std::ostream &out) const override {
     out << "struct decl: ";
@@ -44,7 +44,7 @@ struct OpaqueStruct : public ExprBase, Type {
   }
   TokenView getName() const noexcept override { return "opaque struct"; }
   TokenView getTypename() const noexcept override { return identity; }
-  ExpressionPtr clone() const override {
+  ExprPtr clone() const override {
     return std::make_unique<OpaqueStruct>(*this);
   }
 };

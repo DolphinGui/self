@@ -3,8 +3,8 @@
 #include "ast/functions.hpp"
 
 namespace {
-void dispatch(self::ExpressionRef e) {
-  if (auto *tree = dynamic_cast<self::ExpressionTree *>(&e.get())) {
+void dispatch(self::ExprRef e) {
+  if (auto *tree = dynamic_cast<self::ExprTree *>(&e.get())) {
     tree->complete_types();
   } else if (auto *fun = dynamic_cast<self::FunBase *>(&e.get())) {
     fun->body.complete_types();
@@ -12,7 +12,7 @@ void dispatch(self::ExpressionRef e) {
 }
 } // namespace
 
-void self::ExpressionTree::complete_types() {
+void self::ExprTree::complete_types() {
   for (auto &e : *this) {
     dispatch(*e);
   }

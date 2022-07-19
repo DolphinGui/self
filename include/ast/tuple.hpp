@@ -9,12 +9,12 @@
 namespace self {
 struct Tuple : public ExprImpl<Tuple> {
   Tuple() = default;
-  Tuple(ExpressionTree &&contents) : members(std::move(contents)) {}
+  Tuple(ExprTree &&contents) : members(std::move(contents)) {}
   Tuple(const Tuple &other) {
     std::for_each(other.members.cbegin(), other.members.cend(),
                   [&](const auto &e) { members.push_back(e->clone()); });
   }
-  ExpressionTree members;
+  ExprTree members;
   std::ostream &print(std::ostream &out) const override {
     out << '(';
     for (auto &m : members) {

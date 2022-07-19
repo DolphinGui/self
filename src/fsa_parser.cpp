@@ -128,7 +128,7 @@ struct GlobalParser {
     }
   }
 
-  static void processSubtrees(self::ExpressionTree &tree, auto begin,
+  static void processSubtrees(self::ExprTree &tree, auto begin,
                               auto end) {
     for (auto open = begin; open != end; ++open) {
       if (auto *open_paren =
@@ -140,9 +140,9 @@ struct GlobalParser {
             if (close_paren->getToken() == "(") {
               processSubtrees(tree, close, end);
             } else if (close_paren->getToken() == ")") {
-              auto subtree = std::make_unique<self::ExpressionTree>();
+              auto subtree = std::make_unique<self::ExprTree>();
               subtree->reserve(std::distance(open + 1, close));
-              std::for_each(open + 1, close, [&](self::ExpressionPtr &e) {
+              std::for_each(open + 1, close, [&](self::ExprPtr &e) {
                 subtree->emplace_back(std::move(e));
               });
               tree.erase(open, close + 1);
@@ -154,11 +154,11 @@ struct GlobalParser {
     }
   }
 
-  static void processSubtrees(self::ExpressionTree &tree) {
+  static void processSubtrees(self::ExprTree &tree) {
     return processSubtrees(tree, tree.begin(), tree.end());
   }
 
-  void processTuples(self::ExpressionTree &tree, self::SymbolMap &context,
+  void processTuples(self::ExprTree &tree, self::SymbolMap &context,
                      self::SymbolMap &global) {
     size_t size = 0;
     auto tuple = std::make_unique<self::Tuple>();
@@ -166,9 +166,9 @@ struct GlobalParser {
     for (auto it = tree.begin(); it != tree.end(); ++it, ++size) {
       if (auto *comma = dynamic_cast<self::UnevaluatedExpression *>(it->get());
           comma && comma->getToken() == ",") {
-        self::ExpressionTree branch;
+        self::ExprTree branch;
         branch.reserve(size);
-        std::for_each(mark, it, [&](self::ExpressionPtr &ptr) {
+        std::for_each(mark, it, [&](self::ExprPtr &ptr) {
           branch.push_back(std::move(ptr));
         });
         mark = it = tree.erase(mark, it + 1);
@@ -289,14 +289,14 @@ struct GlobalParser {
       }
     }
   };
-  self::ExpressionPtr evaluateTree(self::ExpressionTree &tree,
+  self::ExprPtr evaluateTree(self::ExprTree &tree,
                                    self::SymbolMap &local) {
     if (tree.empty()) {
       return std::make_unique<self::Tuple>();
     }
     processSubtrees(tree);
     for (auto &ptr : tree) {
-      if (auto *uneval = dynamic_cast<self::ExpressionTree *>(ptr.get())) {
+      if (auto *uneval = dynamic_cast<self::ExprTree *>(ptr.get())) {
         ptr = evaluateTree(*uneval, local);
       }
     }
@@ -389,7 +389,7 @@ struct GlobalParser {
     return self::foldExpr(std::move(tree.back()), local, global).first;
   }
 
-  self::ExpressionPtr parseSymbol(self::ExpressionPtr &base,
+  self::ExprPtr parseSymbol(self::ExprPtr &base,
                                   self::SymbolMap &local,
                                   self::SymbolMap &global) {
     if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(base.get());
@@ -424,17 +424,17 @@ struct GlobalParser {
     }
     return std::move(base);
   }
-  using callback = std::function<void(self::ExpressionTree &)>;
+  using callback = std::function<void(self::ExprTree &)>;
   using conditional = std::function<bool(self::TokenView)>;
 
   constexpr static auto isEndl = [](self::TokenView t) -> bool {
     return t == self::reserved::endl;
   };
 
-  self::ExpressionPtr parseExpr(TokenIt &t, self::SymbolMap &context,
+  self::ExprPtr parseExpr(TokenIt &t, self::SymbolMap &context,
                                 callback start = nullptr,
                                 conditional endExpr = isEndl) {
-    self::ExpressionTree tree;
+    self::ExprTree tree;
     if (start) {
       start(tree);
     }
@@ -449,7 +449,7 @@ struct GlobalParser {
     return evaluateTree(tree, context);
   }
 
-  self::ExpressionPtr parseVar(TokenIt &t, self::TokenView name,
+  self::ExprPtr parseVar(TokenIt &t, self::TokenView name,
                                self::SymbolMap &context) {
     using namespace self::reserved;
     const auto guard = [this](auto t) {
@@ -471,13 +471,13 @@ struct GlobalParser {
     } else {
       errReport(notReserved(*t), "non-reserved Token expected in expression");
       context.insert({curr->getName(), std::cref(*curr)});
-      return parseExpr(t, context, [&](self::ExpressionTree &tree) {
+      return parseExpr(t, context, [&](self::ExprTree &tree) {
         tree.push_back(std::move(curr));
       });
     }
   }
 
-  self::ExpressionPtr parseFun(TokenIt &t, self::TokenView name,
+  self::ExprPtr parseFun(TokenIt &t, self::TokenView name,
                                self::SymbolMap &context) {
     auto curr = std::make_unique<self::FunctionDef>(name);
     self::SymbolMap local;
@@ -534,7 +534,7 @@ struct GlobalParser {
     return curr;
   }
 
-  self::ExpressionPtr parseStruct(TokenIt &t) {
+  self::ExprPtr parseStruct(TokenIt &t) {
     self::SymbolMap context;
     static unsigned int id = 0;
     auto identity = std::string("struct");
@@ -572,8 +572,8 @@ struct GlobalParser {
     }
   }
 
-  self::ExpressionTree process(TokenIt t) {
-    self::ExpressionTree syntax_tree;
+  self::ExprTree process(TokenIt t) {
+    self::ExprTree syntax_tree;
     using namespace self::reserved;
     while (!t.end()) {
       if (*t == var_t) {
@@ -607,7 +607,7 @@ struct GlobalParser {
 } // namespace
 
 namespace self {
-ExpressionTree parse(TokenVec in, Context &c) {
+ExprTree parse(TokenVec in, Context &c) {
   auto parser = GlobalParser(c);
   return parser.process(TokenIt{in});
 }

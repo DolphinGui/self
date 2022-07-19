@@ -31,7 +31,7 @@ inline void iterate(auto lambda, auto &&arg, auto &&...args) {
 
 struct FunBase : public ExprBase {
   Token name;
-  ExpressionTree body;
+  ExprTree body;
   TypePtr return_type = {nullptr};
   detail::BuiltinInstruction internal;
   bool member = false;
@@ -90,7 +90,7 @@ public:
     return out;
   }
 
-  ExpressionPtr clone() const override {
+  ExprPtr clone() const override {
     return std::make_unique<OperatorDef>(*this);
   }
 
@@ -115,7 +115,7 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
                     arguments.push_back(std::make_unique<VarDeclaration>(*o));
                   });
   }
-  ExpressionPtr clone() const override {
+  ExprPtr clone() const override {
     return std::make_unique<FunctionDef>(*this);
   }
   std::size_t argcount() const noexcept override { return arguments.size(); }
@@ -139,10 +139,10 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
 class FunctionCall : public ExprImpl<FunctionCall> {
 public:
   const FunBase &definition;
-  ExpressionPtr lhs;
-  ExpressionPtr rhs;
+  ExprPtr lhs;
+  ExprPtr rhs;
   FunctionCall(const FunBase &Callee) : definition(Callee) {}
-  FunctionCall(const FunBase &callee, ExpressionPtr &&LHS, ExpressionPtr &&RHS)
+  FunctionCall(const FunBase &callee, ExprPtr &&LHS, ExprPtr &&RHS)
       : definition(callee), lhs(std::move(LHS)), rhs(std::move(RHS)) {}
   FunctionCall(const FunctionCall &other)
       : definition(other.definition), lhs(other.lhs->clone()),

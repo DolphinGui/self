@@ -6,10 +6,10 @@
 
 namespace self {
 class VarDeclaration;
-struct ExpressionTree;
+struct ExprTree;
 void compile(llvm::Module &, llvm::raw_fd_ostream &);
 
 llvm::Type *getType(const VarDeclaration &);
-std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast,
+std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast,
                                       Context &c);
 } // namespace self

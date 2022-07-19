@@ -236,7 +236,7 @@ llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
 } // namespace
 
 namespace self {
-std::unique_ptr<llvm::Module> codegen(const self::ExpressionTree &ast,
+std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast,
                                       Context &c) {
   auto module = std::make_unique<llvm::Module>(
       "todo: make module name meaningful", context);

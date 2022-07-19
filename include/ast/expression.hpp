@@ -58,7 +58,7 @@ struct TypePtr {
 };
 
 struct ExprBase;
-using ExpressionPtr = std::unique_ptr<ExprBase>;
+using ExprPtr = std::unique_ptr<ExprBase>;
 struct ExprBase {
   virtual ~ExprBase() = default;
   virtual bool isComplete() const { return true; }
@@ -69,11 +69,11 @@ struct ExprBase {
   }
   virtual TokenView getName() const noexcept = 0;
   virtual bool isCompiletime() const noexcept { return false; }
-  virtual ExpressionPtr clone() const = 0;
+  virtual ExprPtr clone() const = 0;
 };
 
 template <typename Derive> struct ExprImpl : public ExprBase {
-  ExpressionPtr clone() const override {
+  ExprPtr clone() const override {
     return std::make_unique<Derive>(static_cast<const Derive &>(*this));
   }
 };
@@ -89,12 +89,12 @@ template <typename Derive> struct NameMangling {
     return std::string(t.substr(std::strlen(Derive::prefix)));
   }
 };
-using ExpressionRef = std::reference_wrapper<ExprBase>;
-using ExpressionConstRef = std::reference_wrapper<const ExprBase>;
-using ExpressionList = std::vector<ExpressionPtr>;
-using SymbolMap = std::unordered_multimap<self::TokenView, ExpressionConstRef>;
+using ExprRef = std::reference_wrapper<ExprBase>;
+using ExprConstRef = std::reference_wrapper<const ExprBase>;
+using ExpressionList = std::vector<ExprPtr>;
+using SymbolMap = std::unordered_multimap<self::TokenView, ExprConstRef>;
 enum struct FullyResolved : bool { Resolved, Unresolved };
 struct Context;
-std::pair<ExpressionPtr, FullyResolved>
-foldExpr(ExpressionPtr &&, SymbolMap &local, SymbolMap &global);
+std::pair<ExprPtr, FullyResolved>
+foldExpr(ExprPtr &&, SymbolMap &local, SymbolMap &global);
 } // namespace self

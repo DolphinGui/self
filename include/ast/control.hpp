@@ -3,8 +3,8 @@
 #include "ast/expression_tree.hpp"
 namespace self {
 struct Ret : public ExprImpl<Ret> {
-  ExpressionPtr value;
-  Ret(ExpressionPtr &&val) : value(std::move(val)) {}
+  ExprPtr value;
+  Ret(ExprPtr &&val) : value(std::move(val)) {}
   Ret() = default;
   Ret(const Ret &other) : value(other.clone()) {}
   virtual TokenView getName() const noexcept override { return "return"; }
@@ -22,12 +22,12 @@ struct Ret : public ExprImpl<Ret> {
 };
 
 struct If : public ExprImpl<If> {
-  ExpressionTree block;
-  ExpressionPtr condition;
+  ExprTree block;
+  ExprPtr condition;
   // This may be another If for a elif
   // or just another ExpressionTree
-  ExpressionPtr else_code;
-  If(ExpressionTree &&code, ExpressionPtr &&cond)
+  ExprPtr else_code;
+  If(ExprTree &&code, ExprPtr &&cond)
       : block(std::move(code)), condition(std::move(cond)) {}
   If() = default;
   If(const If &other)
@@ -44,6 +44,6 @@ struct If : public ExprImpl<If> {
     return condition && !block.empty();
   }
 
-  ExpressionPtr clone() const override { return std::make_unique<If>(*this); }
+  ExprPtr clone() const override { return std::make_unique<If>(*this); }
 };
 } // namespace self
