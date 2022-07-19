@@ -93,10 +93,16 @@ void generateFun(const self::FunBase *fun, llvm::Module &module,
   forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
     arg_types.push_back(getType(*a, c));
   });
+  std::string name;
+  if (auto n = self::FunctionDef::demangle(fun->getName()); n == "main") {
+    name = "main";
+  } else {
+    name = fun->getName();
+  }
   auto type = llvm::FunctionType::get(getType(*fun->return_type.ptr, c),
                                       arg_types, false);
   auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
-                                       fun->getName(), module);
+                                       name, module);
   if (fun->body_defined) {
     auto block = llvm::BasicBlock::Create(context, "entry", result);
     auto builder = llvm::IRBuilder<>(context);
@@ -236,8 +242,7 @@ llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
 } // namespace
 
 namespace self {
-std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast,
-                                      Context &c) {
+std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c) {
   auto module = std::make_unique<llvm::Module>(
       "todo: make module name meaningful", context);
   for (auto &expr : ast) { // clang-format off

@@ -6,19 +6,21 @@ set(COMPILER_SRC ${CMAKE_SOURCE_DIR}/src)
 set(STDLIB_SRC ${CMAKE_SOURCE_DIR}/stdlib)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/argh/CMakeLists.txt"
- OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/fmt/CMakeLists.txt"
- OR NOT EXISTS "${PROJECT_SOURCE_DIR}/deps/re2/CMakeLists.txt")
-    message(FATAL_ERROR "The submodules were not downloaded!.")
-endif()
-# Yes I know this is probably bad no I am not
-# dealing with bizzare issues that crop up from
-# mixing cxx_standards
-set_property(GLOBAL PROPERTY CXX_STANDARD 20)
+include(FetchContent)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/deps/argh)
-add_subdirectory(${CMAKE_SOURCE_DIR}/deps/re2)
-add_subdirectory(${CMAKE_SOURCE_DIR}/deps/fmt)
+FetchContent_Declare(json
+URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.tar.xz)
+FetchContent_Declare(argh
+GIT_REPOSITORY https://github.com/adishavit/argh.git
+GIT_TAG 39b9a00046143f6b300dcf98ea989486cf62097d)
+FetchContent_Declare(re2
+GIT_REPOSITORY https://github.com/google/re2.git
+GIT_TAG ba2e7c2f25047a6848f2baa9bc4cb700ea9dda84)
+FetchContent_Declare(fmt
+GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+GIT_TAG c48be439f1ae03f2726e30ac93fce3a667dc4be2)
+FetchContent_MakeAvailable(json argh re2 fmt)
 
 if(NOT TARGET re2::re2)
   message(FATAL_ERROR "re2 has failed to build")
@@ -31,22 +33,6 @@ if(NOT TARGET fmt::fmt)
 endif()
 
 include(CheckCXXCompilerFlag)
-
-function(enable_cxx_compiler_flag_if_supported flag)
-    string(FIND "${CMAKE_CXX_FLAGS}" "${flag}" flag_already_set)
-    if(flag_already_set EQUAL -1)
-        check_cxx_compiler_flag("${flag}" flag_supported)
-        if(flag_supported)
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${flag}" PARENT_SCOPE)
-        endif()
-        unset(flag_supported CACHE)
-    endif()
-endfunction()
-
-# example usage
-enable_cxx_compiler_flag_if_supported("-Wall")
-enable_cxx_compiler_flag_if_supported("-Wextra")
-enable_cxx_compiler_flag_if_supported("-pedantic")
 
 find_package(LLVM REQUIRED CONFIG)
 include_directories(${LLVM_INCLUDE_DIRS})
@@ -65,12 +51,17 @@ add_library(selfast ${COMPILER_SRC}/ast.cpp ${COMPILER_SRC}/complete_types.cpp)
 target_include_directories(selfast PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfast PROPERTY CXX_STANDARD 20)
 
+add_library(selfffi ${COMPILER_SRC}/ast.cpp ${COMPILER_SRC}/ffi_parse.cpp)
+target_include_directories(selfffi PUBLIC ${CMAKE_SOURCE_DIR}/include)
+set_property(TARGET selfffi PROPERTY CXX_STANDARD 20)
+target_link_libraries(selfffi PRIVATE clang)
+
 add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfparse PUBLIC re2::re2 selfast)
-target_compile_options(selfparse PUBLIC -fsanitize=address)
-target_link_options(selfparse PUBLIC -fsanitize=address)
+target_link_libraries(selfparse PRIVATE re2::re2 selfast selfffi)
+# target_compile_options(selfparse PUBLIC -fsanitize=address)
+# target_link_options(selfparse PUBLIC -fsanitize=address)
 # For now I haven't been having mem leak issues, and the
 # indirect leak warnings from llvm have been pretty annoying.
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)
@@ -81,15 +72,13 @@ target_link_libraries(selfgen PRIVATE ${llvm_libs} ${TARGET_INFO} selfast)
 # target_link_options(selfgen PUBLIC -fsanitize=address)
 
 
-add_library(selfstd
-${STDLIB_SRC}/io.c)
-target_include_directories(selfstd PUBLIC
-${STDLIB_SRC}/include)
+add_library(selfstd ${STDLIB_SRC}/io.c)
+target_include_directories(selfstd PUBLIC ${STDLIB_SRC}/include)
 
 if(MSVC)
   target_compile_options(selfparse PRIVATE /W4 /WX)
 else()
-  target_compile_options(selfparse PRIVATE -Wall -Wextra)
+  target_compile_options(selfparse PRIVATE -Wall -Wextra -pedantic)
 endif()
 
 add_executable(selfc ${COMPILER_SRC}/selfc.cpp)
@@ -115,3 +104,10 @@ target_link_libraries(exprfoldtest selfparse selfgen fmt::fmt)
 
 add_executable(cstd_test ${CMAKE_SOURCE_DIR}/tests/cstd_test.c)
 target_link_libraries(cstd_test selfstd)
+
+add_executable(clang_parse ${CMAKE_SOURCE_DIR}/tests/clang_parse.cpp)
+set_property(TARGET clang_parse PROPERTY CXX_STANDARD 20)
+# this is not portable but I'll figure something else out later
+target_link_libraries(clang_parse fmt::fmt argh clang)
+# target_compile_options(clang_parse PUBLIC -fsanitize=address)
+# target_link_options(clang_parse PUBLIC -fsanitize=address)

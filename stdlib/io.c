@@ -19,7 +19,7 @@ uint64_t selfprint(str_view s) {
   return 0;
 }
 
-uint64_t printmulti(unsigned char c, int64_t n) {
+uint64_t printmulti(unsigned char c, uint64_t n) {
   for (int64_t i = 0; i < n; i++) {
     int result = selfputchar(c);
     if (errno) {
