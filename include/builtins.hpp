@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -34,8 +35,9 @@ inline auto operator<<(std::ostream &out, BuiltinTypeRef in) {
 };
 struct Context {
   Context() {
-    for (auto &a : {type_t, i64_t, char_t, f64_t, void_t}) {
-      internal_type_map.insert({a.getTypename(), std::cref(type_t)});
+    for (const auto &type : std::initializer_list<BuiltinTypeRef>{
+             type_t, i64_t, char_t, f64_t, void_t}) {
+      internal_type_map.insert({type.get().getTypename(), std::cref(type)});
     }
   };
   Context(const Context &) = delete;
@@ -81,11 +83,16 @@ struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
     return c.internal_type_map.contains(t);
   }
   static BuiltinTypeLit get(TokenView t, Context &c) {
-    return {c.internal_type_map.at(t), c};
+    auto b = c.internal_type_map.at(t).get();
+    auto result = BuiltinTypeLit(c.internal_type_map.at(t), c);
+    return result;
   }
 
   ExpressionPtr clone() const override {
     return std::make_unique<BuiltinTypeLit>(*this);
+  }
+  inline void printval(std::ostream &out) const {
+    out << value.get().getTypename();
   }
 };
 struct IntLit : public LiteralImpl<size_t, IntLit> {
@@ -93,6 +100,9 @@ struct IntLit : public LiteralImpl<size_t, IntLit> {
 };
 struct CharLit : public LiteralImpl<unsigned char, CharLit> {
   CharLit(unsigned char val, Context &c) : LiteralImpl(val, c.char_t) {}
+  inline void printval(std::ostream &out) const {
+    out << '\'' << value << '\'';
+  }
 };
 struct FloatLit : public LiteralImpl<double, FloatLit> {
   FloatLit(double val, Context &c) : LiteralImpl(val, c.f64_t) {}
@@ -110,12 +120,10 @@ struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
   StringLit(std::string_view s, Context &c)
       : LiteralImpl(string_converter(s), c.str_t) {}
 
-  inline std::ostream &printval(std::ostream &out) const {
-    out << "Literal: \"";
+  inline void printval(std::ostream &out) const {
     for (char c : value) {
       out << c;
     }
-    return out << '\"';
   }
 
   inline TokenView getName() const noexcept override {

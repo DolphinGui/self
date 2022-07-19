@@ -4,12 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
-int selfputchar(unsigned char c) { return fputc((int)c, stdout); }
+uint64_t selfputchar(unsigned char c) { return fputc((int)c, stdout); }
 
-int selfputcharerr(unsigned char c) { return fputc((int)c, stderr); }
-int selfflush() { return fputc('\n', stdout); }
+uint64_t selfputcharerr(unsigned char c) { return fputc((int)c, stderr); }
+uint64_t selfflush() { return fputc('\n', stdout); }
 
-int selfprint(str_view s) {
+uint64_t selfprint(str_view s) {
   for (uint64_t i = 0; i != s.size; ++i) {
     int err = selfputchar(s.str[i]);
     if (!err) {
@@ -19,7 +19,7 @@ int selfprint(str_view s) {
   return 0;
 }
 
-int printmulti(unsigned char c, int64_t n) {
+uint64_t printmulti(unsigned char c, int64_t n) {
   for (int64_t i = 0; i < n; i++) {
     int result = selfputchar(c);
     if (errno) {
@@ -29,4 +29,4 @@ int printmulti(unsigned char c, int64_t n) {
   }
   return 0;
 }
-int geterrno() { return errno; }
+uint64_t geterrno() { return errno; }

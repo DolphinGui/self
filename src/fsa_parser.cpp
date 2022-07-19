@@ -376,8 +376,7 @@ struct GlobalParser {
           binInsert, bin_coerce, local);
     }
     errReport(tree.size() == 1, "tree is not fully resolved");
-    auto result = self::folder(std::move(tree.back()), local, global, c).first;
-    return std::move(result);
+    return self::folder(std::move(tree.back()), local, global, c).first;
   }
 
   self::ExpressionPtr parseSymbol(self::ExpressionPtr &base,
@@ -391,7 +390,6 @@ struct GlobalParser {
 
       } else if (auto [result, ch] = isChar(t); result) {
         return std::make_unique<self::CharLit>(ch, c);
-
       } else if (auto [result, str] = isStr(t); result) {
         return std::make_unique<self::StringLit>(str, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
@@ -478,10 +476,10 @@ struct GlobalParser {
       curr->arguments.emplace_back(
           std::make_unique<self::VarDeclaration>(*t++));
       errReport(*t++ == ":", "\":\" expected here");
-      constexpr auto commaOrEndl = [](self::TokenView t) {
-        return t == self::reserved::endl || t == ")";
+      constexpr auto commaOrParen = [](self::TokenView t) {
+        return t == "," || t == ")";
       };
-      auto e = parseExpr(t, context, nullptr, commaOrEndl);
+      auto e = parseExpr(t, context, nullptr, commaOrParen);
       auto type = self::getLiteralType(*e);
       curr->arguments.back()->type_ref = {&type.ptr, type.is_ref};
       errReport(*t == ")" || *t == ",", "\")\" or \",\" expected");
@@ -492,7 +490,6 @@ struct GlobalParser {
     }
     if (*++t == "->") {
       ++t;
-
       constexpr auto commaOrBracket = [](self::TokenView t) {
         return t == self::reserved::endl || t == "{";
       };

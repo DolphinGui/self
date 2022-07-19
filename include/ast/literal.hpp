@@ -39,6 +39,7 @@ struct LiteralImpl : public Expression, public Literal {
   };
   LiteralImpl(T &&value, TypeRef type) : value(std::move(value)), type(type) {}
   LiteralImpl(const T &value, TypeRef type) : value(value), type(type) {}
+  LiteralImpl(const LiteralImpl &) = default;
   TypePtr getType() const noexcept override {
     return TypePtr(&type.ptr, RefTypes::value);
   }
@@ -48,7 +49,7 @@ struct LiteralImpl : public Expression, public Literal {
   }
 
   ExpressionPtr clone() const override {
-    return std::make_unique<LiteralImpl>(*this);
+    return std::make_unique<Derive>(static_cast<const Derive &>(*this));
   }
 };
 

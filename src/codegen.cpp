@@ -3,6 +3,8 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <cxxabi.h>
 #include <iostream>
 #include <iterator>
 #include <llvm/ADT/APInt.h>
@@ -13,6 +15,7 @@
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
@@ -34,6 +37,7 @@
 
 namespace {
 llvm::LLVMContext context;
+std::unordered_map<std::string_view, llvm::AllocaInst *> var_map;
 llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
                       self::Context &c);
 void unpackArgs(self::Expression *e, auto unary) {
@@ -153,6 +157,9 @@ llvm::Value *generateCall(const self::FunctionCall &fun,
   case self::detail::call:
     return generateFunCall(fun, builder, c);
     break;
+  case self::detail::assign:
+    throw std::runtime_error("unimplemented");
+    break;
   }
   return result;
 }
@@ -196,20 +203,26 @@ llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
     }
   } else if (type == typeid(self::IntLit)) {
     return llvm::ConstantInt::get(
-        llvm::Type::getInt32Ty(context),
-        llvm::APInt(32, dynamic_cast<const self::IntLit &>(*expr).value));
-  } else if (type == typeid(self::CharLit)) {
-    return llvm::ConstantInt::get(
-        llvm::Type::getInt8Ty(context),
-        llvm::APInt(8, dynamic_cast<const self::CharLit &>(*expr).value));
+        llvm::Type::getInt64Ty(context),
+        llvm::APInt(64, dynamic_cast<const self::IntLit &>(*expr).value));
+  } else if (auto character = dynamic_cast<const self::CharLit *>(expr)) {
+    return llvm::ConstantInt::get(llvm::Type::getInt8Ty(context),
+                                  llvm::APInt(8, character->value));
   } else if (type == typeid(self::StringLit)) {
     auto &str = dynamic_cast<const self::StringLit &>(*expr);
     return createString(str, *builder.GetInsertBlock()->getModule());
   } else if (type == typeid(self::VarDeclaration)) {
     auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
-    return builder.CreateAlloca(getType(var, c), 0, var.getName());
+    auto result = builder.CreateAlloca(getType(var, c), 0, var.getName());
+    var_map.insert({self::VarDeclaration::demangle(var.getName()), result});
+    return result;
+  } else if (type == typeid(self::VarDeref)) {
+    auto var = dynamic_cast<const self::VarDeref &>(*expr);
+    return var_map.at(self::VarDeclaration::demangle(var.getName()));
   } else {
-    std::cerr << type.name() << '\n';
+    auto a = type.name();
+    auto n = abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr);
+    std::cerr << n << '\n';
     throw std::runtime_error("I dont know what type this is\n");
   }
 }

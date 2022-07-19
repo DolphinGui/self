@@ -14,13 +14,14 @@
 // newline. In a real file the semicolons are
 // not necessary.
 constexpr auto file = R"(
-fun selfputchar(c: char)->i32;
+fun selfputchar(c: char)->i64;
 fun selfflush()->void;
-fun printmulti(c: char, i: i32)->i32;
-fun geterrno()->i32;
-fun main()->i32{
+fun printmulti(c: char, i: i64)->i64;
+fun geterrno()->i64;
+fun main()->i64{
   "this is a string\n";
   var a = 5 - 2;
+  var b = a;
   var errno = geterrno();
   selfputchar('h');
   selfputchar('e');
