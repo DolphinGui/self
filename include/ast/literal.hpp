@@ -20,7 +20,7 @@ struct hasPrint<T, std::void_t<decltype(std::declval<T>().printval(
 }; // namespace detail
 struct Literal {};
 template <typename T, typename Derive>
-struct LiteralImpl : public Expression, public Literal {
+struct LiteralImpl : public ExprImpl<Derive>, public Literal {
   T value;
   TypeRef type;
   inline std::ostream &print(std::ostream &out) const override {
@@ -46,10 +46,6 @@ struct LiteralImpl : public Expression, public Literal {
   bool isCompiletime() const noexcept override { return true; }
   bool operator==(const LiteralImpl &other) const noexcept {
     return other.value == value;
-  }
-
-  ExpressionPtr clone() const override {
-    return std::make_unique<Derive>(static_cast<const Derive &>(*this));
   }
 };
 

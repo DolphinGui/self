@@ -10,7 +10,7 @@
 #include "ast/expression_tree.hpp"
 
 namespace self {
-struct StructDef : public Expression, Type {
+struct StructDef : public ExprImpl<StructDef>, Type {
   std::string identity;
   ExpressionTree body;
 
@@ -29,12 +29,8 @@ struct StructDef : public Expression, Type {
   }
   TokenView getName() const noexcept override { return "struct decl"; }
   TokenView getTypename() const noexcept override { return identity; }
-
-  ExpressionPtr clone() const override {
-    return std::make_unique<StructDef>(*this);
-  }
 };
-struct OpaqueStruct : public Expression, Type {
+struct OpaqueStruct : public ExprBase, Type {
   OpaqueStruct(unsigned int identity, size_t size = 0)
       : size(size),
         identity(std::string("struct").append(std::to_string(identity))) {}

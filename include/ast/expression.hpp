@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <ostream>
@@ -48,7 +49,7 @@ struct TypePtr {
     }
     return left.ptr == right.ptr && left.is_ref == right.is_ref;
   }
-  operator TypeRef() {
+  operator TypeRef() const {
     if (!ptr) {
       throw std::runtime_error("TypePtr is null");
     }
@@ -56,14 +57,14 @@ struct TypePtr {
   }
 };
 
-struct Expression;
-using ExpressionPtr = std::unique_ptr<Expression>;
-struct Expression {
-  virtual ~Expression() = default;
+struct ExprBase;
+using ExpressionPtr = std::unique_ptr<ExprBase>;
+struct ExprBase {
+  virtual ~ExprBase() = default;
   virtual bool isComplete() const { return true; }
   virtual TypePtr getType() const noexcept { return {nullptr}; }
   virtual std::ostream &print(std::ostream &) const = 0;
-  friend std::ostream &operator<<(std::ostream &os, const Expression &ex) {
+  friend std::ostream &operator<<(std::ostream &os, const ExprBase &ex) {
     return ex.print(os);
   }
   virtual TokenView getName() const noexcept = 0;
@@ -71,12 +72,29 @@ struct Expression {
   virtual ExpressionPtr clone() const = 0;
 };
 
-using ExpressionRef = std::reference_wrapper<Expression>;
-using ExpressionConstRef = std::reference_wrapper<const Expression>;
+template <typename Derive> struct ExprImpl : public ExprBase {
+  ExpressionPtr clone() const override {
+    return std::make_unique<Derive>(static_cast<const Derive &>(*this));
+  }
+};
+
+template <typename Derive> struct NameMangling {
+  static std::string mangle(std::string_view t) {
+    std::string name = Derive::prefix;
+    name.append(t);
+    return name;
+  }
+  static std::string demangle(std::string_view t) {
+    auto result = std::string(t);
+    return std::string(t.substr(std::strlen(Derive::prefix)));
+  }
+};
+using ExpressionRef = std::reference_wrapper<ExprBase>;
+using ExpressionConstRef = std::reference_wrapper<const ExprBase>;
 using ExpressionList = std::vector<ExpressionPtr>;
 using SymbolMap = std::unordered_multimap<self::TokenView, ExpressionConstRef>;
 enum struct FullyResolved : bool { Resolved, Unresolved };
 struct Context;
 std::pair<ExpressionPtr, FullyResolved>
-folder(ExpressionPtr&&, SymbolMap &local, SymbolMap &global, Context &c);
+foldExpr(ExpressionPtr &&, SymbolMap &local, SymbolMap &global);
 } // namespace self

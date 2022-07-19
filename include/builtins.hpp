@@ -36,7 +36,7 @@ inline auto operator<<(std::ostream &out, BuiltinTypeRef in) {
 struct Context {
   Context() {
     for (const auto &type : std::initializer_list<BuiltinTypeRef>{
-             type_t, i64_t, char_t, f64_t, void_t}) {
+             type_t, i64_t, char_t, f64_t, void_t, str_t, bool_t}) {
       internal_type_map.insert({type.get().getTypename(), std::cref(type)});
     }
   };
@@ -47,33 +47,31 @@ struct Context {
   const TypeType f64_t = TypeType("f64");
   const TypeType void_t = TypeType("void");
   const TypeType str_t = TypeType("str");
+  const TypeType bool_t = TypeType("bool");
   std::unordered_map<TokenView, BuiltinTypeRef> internal_type_map;
 
-  const OperatorDef i64_assignment = detail::ctr_lambda(
-      OperatorDef("=", i64_t,
-                  VarDeclarationPtr("this", TypeRef{i64_t, RefTypes::ref}),
-                  VarDeclarationPtr("RHS", i64_t), true),
-      detail::store);
-  const OperatorDef addi = detail::ctr_lambda(
+  const OperatorDef i64_assignment = OperatorDef(
+      "=", i64_t, VarDeclarationPtr("this", TypeRef{i64_t, RefTypes::ref}),
+      VarDeclarationPtr("RHS", i64_t), detail::store, true);
+  const OperatorDef addi =
       OperatorDef("+", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t)),
-      detail::addi);
-  const OperatorDef subi = detail::ctr_lambda(
+                  VarDeclarationPtr("RHS", i64_t), detail::addi);
+  const OperatorDef subi =
       OperatorDef("-", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t)),
-      detail::subi);
-  const OperatorDef muli = detail::ctr_lambda(
+                  VarDeclarationPtr("RHS", i64_t), detail::subi);
+  const OperatorDef muli =
       OperatorDef("*", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t)),
-      detail::muli);
-  const OperatorDef divi = detail::ctr_lambda(
+                  VarDeclarationPtr("RHS", i64_t), detail::muli);
+  const OperatorDef divi =
       OperatorDef("/", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t)),
-      detail::divi);
+                  VarDeclarationPtr("RHS", i64_t), detail::divi);
+  const OperatorDef cmpi =
+      OperatorDef("==", bool_t, VarDeclarationPtr("LHS", i64_t),
+                  VarDeclarationPtr("RHS", i64_t), detail::cmp);
   const OperatorDef struct_assignment =
       OperatorDef("=", TypeRef(type_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(type_t, RefTypes::ref)),
-                  VarDeclarationPtr("RHS", type_t), true);
+                  VarDeclarationPtr("RHS", type_t), detail::assign, true);
 };
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
   // I really need to create a global object
@@ -107,15 +105,6 @@ struct CharLit : public LiteralImpl<unsigned char, CharLit> {
 struct FloatLit : public LiteralImpl<double, FloatLit> {
   FloatLit(double val, Context &c) : LiteralImpl(val, c.f64_t) {}
 };
-struct StructLit : public LiteralImpl<StructDef, StructLit> {
-  StructLit(StructDef &&val, Context &c)
-      : LiteralImpl(std::move(val), c.type_t) {}
-};
-struct OpaqueLit : public LiteralImpl<OpaqueStruct, OpaqueLit> {
-  OpaqueLit(OpaqueStruct &&val, Context &c)
-      : LiteralImpl(std::move(val), c.type_t) {}
-};
-
 struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
   StringLit(std::string_view s, Context &c)
       : LiteralImpl(string_converter(s), c.str_t) {}
@@ -139,8 +128,22 @@ private:
     return result;
   };
 };
+
+struct BoolLit : public LiteralImpl<bool, BoolLit> {
+  BoolLit(bool val, Context &c) : LiteralImpl(val, c.i64_t) {}
+};
+
+struct StructLit : public LiteralImpl<StructDef, StructLit> {
+  StructLit(StructDef &&val, Context &c)
+      : LiteralImpl(std::move(val), c.type_t) {}
+};
+struct OpaqueLit : public LiteralImpl<OpaqueStruct, OpaqueLit> {
+  OpaqueLit(OpaqueStruct &&val, Context &c)
+      : LiteralImpl(std::move(val), c.type_t) {}
+};
+
 // using StringLit = LiteralImpl<std::vector<unsigned char>>;
-inline TypeRef getLiteralType(const Expression &e) {
+inline TypeRef getLiteralType(const ExprBase &e) {
   if (auto *builtin = dynamic_cast<const BuiltinTypeLit *>(&e)) {
     return builtin->value.get();
   } else if (auto *structural = dynamic_cast<const StructLit *>(&e)) {

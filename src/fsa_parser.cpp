@@ -80,6 +80,15 @@ std::pair<bool, std::string> isStr(self::TokenView t) {
   return {true, std::string(literal.substr(1, literal.length() - 2))};
 }
 
+std::pair<bool, bool> isBool(self::TokenView t) {
+  if (t == "true")
+    return {true, true};
+  else if (t == "false")
+    return {true, false};
+  else
+    return {false, false};
+}
+
 constexpr auto notReserved = [](auto t) {
   return !self::reserved::isKeyword(t) && !self::reserved::isGrammar(t);
 };
@@ -185,7 +194,7 @@ struct GlobalParser {
   }
 
   enum struct coerce_result { match, coerce, mismatch };
-  coerce_result need_coerce(const self::Expression *e, self::TypePtr type) {
+  coerce_result need_coerce(const self::ExprBase *e, self::TypePtr type) {
     using enum coerce_result;
     if (const auto *var = dynamic_cast<const self::VarDeclaration *>(e)) {
       if (!var->type_ref.ptr) {
@@ -201,7 +210,7 @@ struct GlobalParser {
       return mismatch;
   }
 
-  static bool coerceType(self::Expression *e, self::TypePtr type) {
+  static bool coerceType(self::ExprBase *e, self::TypePtr type) {
     if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
       if (!var->type_ref.ptr) {
         var->type_ref = type;
@@ -214,13 +223,13 @@ struct GlobalParser {
     return e->getType() == type;
   }
 
-  static size_t tuple_count(self::Expression *e) {
+  static size_t tuple_count(self::ExprBase *e) {
     if (auto *tuple = dynamic_cast<self::Tuple *>(e))
       return tuple->members.size();
     return 1;
   }
 
-  static void for_tuple(self::Expression *e, auto unary) {
+  static void for_tuple(self::ExprBase *e, auto unary) {
     if (auto *tuple = dynamic_cast<self::Tuple *>(e)) {
       for (auto &a : tuple->members) {
         unary(*a);
@@ -229,7 +238,7 @@ struct GlobalParser {
     unary(*e);
   }
 
-  static void for_tuple(self::Expression *left, auto gen, auto binary) {
+  static void for_tuple(self::ExprBase *left, auto gen, auto binary) {
     if (auto *tuple = dynamic_cast<self::Tuple *>(left)) {
       for (auto l = tuple->members.begin(); l != tuple->members.end(); ++l) {
         binary(**l, gen());
@@ -246,22 +255,23 @@ struct GlobalParser {
     if (auto *t = dynamic_cast<self::UnevaluatedExpression *>(it->get())) {
       auto lhs = it, rhs = it;
       lhsrhsinc(lhs, rhs);
-      auto candidates = self::pair_range(global.equal_range(t->getToken()));
+      auto candidates =
+          self::pair_range(global.equal_range(T::mangle(t->getToken())));
       std::vector<const T *> no_coerce;
       std::vector<const T *> coerced;
       for (auto &[_, fun] : candidates) {
-        if (const auto *op = dynamic_cast<const T *>(&fun.get());
-            op && (not_a_member ^ op->member)) {
-          cond(op, lhs, rhs, no_coerce, coerced);
+        const auto &op = dynamic_cast<const T &>(fun.get());
+        if (not_a_member ^ op.member) {
+          cond(&op, lhs, rhs, no_coerce, coerced);
         }
       }
       if (&global != &context) {
         auto local_candidates =
-            self::pair_range(context.equal_range(t->getToken()));
+            self::pair_range(context.equal_range(T::mangle(t->getToken())));
         for (auto &[_, fun] : local_candidates) {
-          if (const auto *op = dynamic_cast<const T *>(&fun.get());
-              op && (not_a_member ^ op->member)) {
-            cond(op, lhs, rhs, no_coerce, coerced);
+          const auto &op = dynamic_cast<const T &>(fun.get());
+          if (not_a_member ^ op.member) {
+            cond(&op, lhs, rhs, no_coerce, coerced);
           }
         }
       }
@@ -320,7 +330,7 @@ struct GlobalParser {
             int i = 0;
             for_tuple(rhs.get(), [&]{
               return fun.arguments.at(i++)->getDecltype();},
-              [](self::Expression& e, auto type){coerceType(&e, type);});
+              [](self::ExprBase& e, auto type){coerceType(&e, type);});
           }, local);
     }
     #pragma clang diagnostic pop // clang-format on
@@ -376,7 +386,7 @@ struct GlobalParser {
           binInsert, bin_coerce, local);
     }
     errReport(tree.size() == 1, "tree is not fully resolved");
-    return self::folder(std::move(tree.back()), local, global, c).first;
+    return self::foldExpr(std::move(tree.back()), local, global).first;
   }
 
   self::ExpressionPtr parseSymbol(self::ExpressionPtr &base,
@@ -392,6 +402,8 @@ struct GlobalParser {
         return std::make_unique<self::CharLit>(ch, c);
       } else if (auto [result, str] = isStr(t); result) {
         return std::make_unique<self::StringLit>(str, c);
+      } else if (auto [result, boolean] = isBool(t); result) {
+        return std::make_unique<self::BoolLit>(boolean, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
         return std::make_unique<self::BuiltinTypeLit>(
             self::BuiltinTypeLit::get(t, c));
@@ -581,7 +593,7 @@ struct GlobalParser {
   }
 
   GlobalParser(self::Context &c) : c(c) {
-    const auto symbolInserter = [this](const self::Expression &expr) {
+    const auto symbolInserter = [this](const self::ExprBase &expr) {
       global.insert({expr.getName(), std::cref(expr)});
     };
     symbolInserter(c.i64_assignment);

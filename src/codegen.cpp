@@ -37,10 +37,10 @@
 
 namespace {
 llvm::LLVMContext context;
-std::unordered_map<std::string_view, llvm::AllocaInst *> var_map;
-llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
+std::unordered_map<std::string, llvm::AllocaInst *> var_map;
+llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
                       self::Context &c);
-void unpackArgs(self::Expression *e, auto unary) {
+void unpackArgs(self::ExprBase *e, auto unary) {
   if (auto *args = dynamic_cast<self::arg_pack *>(e)) {
     for (auto &arg : args->members) {
       unary(*arg);
@@ -125,7 +125,7 @@ llvm::Value *generateFunCall(const self::FunctionCall &base,
   auto callee = llvm::FunctionCallee(type, val);
   std::vector<llvm::Value *> args;
   args.reserve(base.definition.argcount());
-  forEachArg(base, [&](const self::Expression &e) {
+  forEachArg(base, [&](const self::ExprBase &e) {
     args.push_back(dispatch(&e, builder, c));
   });
   return builder.CreateCall(callee, args);
@@ -133,7 +133,7 @@ llvm::Value *generateFunCall(const self::FunctionCall &base,
 llvm::Value *generateCall(const self::FunctionCall &fun,
                           llvm::IRBuilder<> &builder, self::Context &c) {
   llvm::Value *result = nullptr;
-  switch (self::detail::BuiltinInstruction(fun.get_def().internal)) {
+  switch (fun.getDefinition().internal) {
   case self::detail::addi:
     result = builder.CreateAdd(dispatch(fun.lhs.get(), builder, c),
                                dispatch(fun.rhs.get(), builder, c));
@@ -158,8 +158,11 @@ llvm::Value *generateCall(const self::FunctionCall &fun,
     return generateFunCall(fun, builder, c);
     break;
   case self::detail::assign:
+  case self::detail::cmp:
     throw std::runtime_error("unimplemented");
     break;
+  default:
+    throw std::runtime_error("This shouldn't happen");
   }
   return result;
 }
@@ -190,7 +193,7 @@ llvm::Value *createString(const self::StringLit &str, llvm::Module &m) {
   return global;
 }
 
-llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
+llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
                       self::Context &c) {
   if (auto *fun = dynamic_cast<const self::FunctionCall *>(expr)) {
     return generateCall(*fun, builder, c);
@@ -211,6 +214,10 @@ llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
   } else if (type == typeid(self::StringLit)) {
     auto &str = dynamic_cast<const self::StringLit &>(*expr);
     return createString(str, *builder.GetInsertBlock()->getModule());
+  } else if (type == typeid(self::BoolLit)) {
+    return llvm::ConstantInt::getBool(
+        llvm::Type::getInt1Ty(context),
+        dynamic_cast<const self::BoolLit &>(*expr).value);
   } else if (type == typeid(self::VarDeclaration)) {
     auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
     auto result = builder.CreateAlloca(getType(var, c), 0, var.getName());
@@ -220,9 +227,8 @@ llvm::Value *dispatch(const self::Expression *expr, llvm::IRBuilder<> &builder,
     auto var = dynamic_cast<const self::VarDeref &>(*expr);
     return var_map.at(self::VarDeclaration::demangle(var.getName()));
   } else {
-    auto a = type.name();
-    auto n = abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr);
-    std::cerr << n << '\n';
+    std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
+              << '\n';
     throw std::runtime_error("I dont know what type this is\n");
   }
 }

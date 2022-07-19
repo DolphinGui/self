@@ -3,7 +3,7 @@
 #include "ast/expression.hpp"
 
 namespace self {
-class UnevaluatedExpression : public Expression {
+class UnevaluatedExpression : public ExprImpl<UnevaluatedExpression> {
   Token contents;
 
 public:
@@ -17,10 +17,6 @@ public:
   virtual bool isComplete() const override { return false; }
   virtual TokenView getName() const noexcept override {
     return "unevaluated expression";
-  }
-
-  ExpressionPtr clone() const override {
-    return std::make_unique<UnevaluatedExpression>(*this);
   }
 };
 } // namespace self

@@ -7,7 +7,7 @@
 #include "ast/expression.hpp"
 
 namespace self {
-struct ExpressionTree : public Expression, public ExpressionList {
+struct ExpressionTree : public ExprImpl<ExpressionTree>, public ExpressionList {
   inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
@@ -34,13 +34,13 @@ struct ExpressionTree : public Expression, public ExpressionList {
     return true;
   }
   void complete_types();
-  ExpressionPtr clone() const override {
-    auto t = std::make_unique<ExpressionTree>();
-    std::for_each(this->cbegin(), this->cend(),
-                  [&](const ExpressionPtr &p) { t->push_back(p->clone()); });
-    return t;
+  ExpressionTree() = default;
+  ExpressionTree(const ExpressionTree &other) {
+    std::for_each(other.cbegin(), other.cend(),
+                  [&](const ExpressionPtr &p) { this->push_back(p->clone()); });
   }
 };
+
 struct namespace_tree : ExpressionTree {
   Token name;
   inline std::ostream &print(std::ostream &out) const override {

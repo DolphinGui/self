@@ -11,3 +11,7 @@
   * compiletime versions of control flow
 * FFI
   * import a c/c++ lexer
+* Type features
+  * pointers and references
+  * const?
+  * compiletime/runtime

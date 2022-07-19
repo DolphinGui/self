@@ -6,12 +6,22 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <string_view>
 
 namespace self {
 
 namespace detail {
 
-enum BuiltinInstruction { call = 0, store, addi, subi, muli, divi, assign };
+enum BuiltinInstruction {
+  call = 0,
+  store,
+  addi,
+  subi,
+  muli,
+  divi,
+  cmp,
+  assign
+};
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }
 inline void iterate(auto lambda, auto &&arg, auto &&...args) {
   lambda(arg);
@@ -19,44 +29,51 @@ inline void iterate(auto lambda, auto &&arg, auto &&...args) {
 }
 } // namespace detail
 
-struct FunBase : public Expression {
+struct FunBase : public ExprBase {
   Token name;
   ExpressionTree body;
   TypePtr return_type = {nullptr};
-  detail::BuiltinInstruction internal = detail::call;
+  detail::BuiltinInstruction internal;
   bool member = false;
   bool body_defined = false;
 
 protected:
-  FunBase(TokenView name, bool member = false) : name(name), member(member) {}
+  FunBase(TokenView name, bool member = false)
+      : name(name), internal(detail::call), member(member) {}
 
-  FunBase(TokenView name, TypeRef return_type, bool member = false)
+  FunBase(TokenView name, TypeRef return_type, bool member = false,
+          detail::BuiltinInstruction internal = detail::call)
       : name(name), return_type(&return_type.ptr, return_type.is_ref),
-        member(member) {}
+        internal(internal), member(member) {}
 
 public:
-  // virtual std::ostream &print(std::ostream &out) const override;
   std::string_view getName() const noexcept override { return name; }
   bool isComplete() const noexcept override { return return_type.ptr; }
   virtual std::size_t argcount() const noexcept = 0;
 };
 
-class OperatorDef : public FunBase {
+class OperatorDef : public FunBase, public NameMangling<OperatorDef> {
 public:
   std::unique_ptr<VarDeclaration> lhs;
   std::unique_ptr<VarDeclaration> rhs;
   OperatorDef(TokenView name, TypeRef return_type,
               std::unique_ptr<VarDeclaration> &&LHS,
-              std::unique_ptr<VarDeclaration> &&RHS, bool member = false)
-      : FunBase(name, return_type, member), lhs(std::move(LHS)),
-        rhs(std::move(RHS)) {}
+              std::unique_ptr<VarDeclaration> &&RHS,
+              detail::BuiltinInstruction internal = detail::call,
+              bool member = false)
+      : FunBase(mangle(name), return_type, member, internal),
+        lhs(std::move(LHS)), rhs(std::move(RHS)) {}
+  OperatorDef(const OperatorDef &other)
+      : FunBase(other.name, other.return_type, other.member),
+        lhs(std::make_unique<VarDeclaration>(*other.lhs)),
+        rhs(std::make_unique<VarDeclaration>(*other.rhs)) {}
   std::size_t argcount() const noexcept override {
     if (!lhs || !rhs)
       return 1;
     return 2;
   }
   std::ostream &print(std::ostream &out) const override {
-    out << "operator " << name << "( ";
+    out << "operator " << demangle(name) << "( ";
     if (lhs) {
       out << *lhs << ", ";
     }
@@ -72,19 +89,21 @@ public:
     }
     return out;
   }
+
   ExpressionPtr clone() const override {
-    return std::make_unique<OperatorDef>(
-        this->getName(), TypePtr(this->return_type), this->lhs->cloneVar(),
-        this->rhs->cloneVar());
+    return std::make_unique<OperatorDef>(*this);
   }
+
+  constexpr static auto prefix = "__operator_";
 };
 
-struct FunctionDef : public FunBase {
+struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   std::vector<std::unique_ptr<VarDeclaration>> arguments;
-  FunctionDef(TokenView name, bool member = false) : FunBase(name, member) {}
+  FunctionDef(TokenView name, bool member = false)
+      : FunBase(mangle(name), member) {}
   FunctionDef(TokenView name, TypeRef return_type, bool member = false,
               auto &&...args)
-      : FunBase(name, return_type, member) {
+      : FunBase(mangle(name), return_type, member, detail::call) {
     arguments.reserve(sizeof...(args));
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
@@ -92,14 +111,16 @@ struct FunctionDef : public FunBase {
   FunctionDef(const FunctionDef &other)
       : FunBase(other.getName(), other.member) {
     std::for_each(other.arguments.cbegin(), other.arguments.cend(),
-                  [&](const auto &o) { arguments.push_back(o->cloneVar()); });
+                  [&](const auto &o) {
+                    arguments.push_back(std::make_unique<VarDeclaration>(*o));
+                  });
   }
   ExpressionPtr clone() const override {
     return std::make_unique<FunctionDef>(*this);
   }
   std::size_t argcount() const noexcept override { return arguments.size(); }
   std::ostream &print(std::ostream &out) const override {
-    out << "operator " << name << "( ";
+    out << "operator " << demangle(name) << "( ";
     for (const auto &arg : arguments) {
       out << *arg << ", ";
     }
@@ -112,9 +133,10 @@ struct FunctionDef : public FunBase {
     }
     return out;
   }
+  constexpr static auto prefix = "__function_";
 };
 
-class FunctionCall : public Expression {
+class FunctionCall : public ExprImpl<FunctionCall> {
 public:
   const FunBase &definition;
   ExpressionPtr lhs;
@@ -143,7 +165,7 @@ public:
       count = 2;
     return count == definition.argcount();
   }
-  const FunBase &get_def() const noexcept { return definition; }
+  const FunBase &getDefinition() const noexcept { return definition; }
   TokenView getName() const noexcept override { return "op call"; }
   bool isUnaryPre() const noexcept { return !lhs && rhs; }
   bool isUnaryPost() const noexcept { return lhs && !rhs; }
@@ -151,9 +173,6 @@ public:
   bool isUnary() const noexcept { return !isBinary(); }
   virtual TypePtr getType() const noexcept override {
     return definition.return_type;
-  }
-  ExpressionPtr clone() const override {
-    return std::make_unique<FunctionCall>(*this);
   }
 };
 } // namespace self

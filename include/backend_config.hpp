@@ -5,7 +5,7 @@
 #include <memory>
 
 namespace self {
-struct VarDeclaration;
+class VarDeclaration;
 struct ExpressionTree;
 void compile(llvm::Module &, llvm::raw_fd_ostream &);
 

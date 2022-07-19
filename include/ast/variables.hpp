@@ -8,19 +8,21 @@
 
 namespace self {
 
-class VarDeclaration : public Expression {
+class VarDeclaration : public ExprImpl<VarDeclaration>,
+                       public NameMangling<VarDeclaration> {
   Token name;
 
 public:
   TypePtr type_ref;
-  Expression *value;
+  ExprBase *value;
   VarDeclaration(TokenView name) : name(mangle(name)), type_ref{nullptr} {}
   VarDeclaration(TokenView name, TypeRef type)
       : name(mangle(name)), type_ref{&type.ptr, type.is_ref} {}
 
   inline std::ostream &print(std::ostream &out) const override {
     if (type_ref.ptr)
-      return out << "var " << demangle(name) << ": " << type_ref.ptr->getTypename();
+      return out << "var " << demangle(name) << ": "
+                 << type_ref.ptr->getTypename();
     else
       return out << "var  " << demangle(name);
   }
@@ -31,20 +33,7 @@ public:
     return result;
   }
 
-  ExpressionPtr clone() const override { return cloneVar(); }
-  std::unique_ptr<VarDeclaration> cloneVar() const {
-    return std::make_unique<VarDeclaration>(*this);
-  }
-
   static constexpr auto prefix = "__var_";
-  static std::string mangle(TokenView t) {
-    std::string name = prefix;
-    name.append(t);
-    return name;
-  }
-  static std::string_view demangle(TokenView t) {
-    return t.substr(std::strlen(prefix));
-  }
 
   TypePtr getDecltype() const noexcept { return type_ref; }
   bool isComplete() const override { return type_ref.ptr; }
@@ -57,7 +46,7 @@ std::unique_ptr<VarDeclaration> VarDeclarationPtr(auto &&...args) {
       std::forward<decltype(args)>(args)...);
 }
 
-struct VarDeref : public Expression {
+struct VarDeref : public ExprImpl<VarDeref> {
   const VarDeclaration &definition;
   std::string name;
 
@@ -74,10 +63,6 @@ struct VarDeref : public Expression {
     auto type = definition.getDecltype();
     type.is_ref = RefTypes::ref;
     return type;
-  }
-
-  ExpressionPtr clone() const override {
-    return std::make_unique<VarDeref>(*this);
   }
 };
 } // namespace self

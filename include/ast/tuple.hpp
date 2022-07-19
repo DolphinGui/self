@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace self {
-struct Tuple : public Expression {
+struct Tuple : public ExprImpl<Tuple> {
   Tuple() = default;
   Tuple(ExpressionTree &&contents) : members(std::move(contents)) {}
   Tuple(const Tuple &other) {
@@ -23,9 +23,6 @@ struct Tuple : public Expression {
     return out << ')';
   }
   TokenView getName() const noexcept override { return "tuple"; }
-  ExpressionPtr clone() const override {
-    return std::make_unique<Tuple>(*this);
-  }
 };
 struct arg_pack : public Tuple {
   arg_pack() = default;
