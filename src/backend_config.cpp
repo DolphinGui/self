@@ -44,7 +44,7 @@ llvm::TargetMachine *config_module(llvm::Module &module) {
   module.setDataLayout(target_machine->createDataLayout());
   return target_machine;
 }
-// TODO: figure out how to port this to new passbuilder
+
 void use_passes(llvm::Module &module, llvm::TargetMachine *target,
                 llvm::raw_fd_ostream &dest) {
   llvm::legacy::PassManager pass;

@@ -1,5 +1,5 @@
 #pragma once
-typedef unsigned long int uint64_t;
+#include <stdint.h>
 struct str_view {
   unsigned char *str;
   uint64_t size;
@@ -7,6 +7,6 @@ struct str_view {
 typedef struct str_view str_view;
 uint64_t selfputchar(unsigned char c);
 uint64_t selfputcharerr(unsigned char c);
-uint64_t selfprint(str_view s);
 uint64_t printmulti(unsigned char c, uint64_t n);
-uint64_t geterrno();
+int64_t geterrno();
+int64_t selfflush();

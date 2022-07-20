@@ -13,17 +13,15 @@ constexpr auto FunctionDef = "fun main()->i64{return 0;}"sv;
 constexpr auto foward_decl = "fun function()->char;"sv;
 constexpr auto struct_test = "var b = i64;var a = struct{var a: char;}"sv;
 constexpr auto nesting = "var a = struct{fun a()->i64{return 22;}}"sv;
-constexpr auto int_test = R"(
-fun selfputchar(c: char)->i64;
-fun main()->i64{
-  selfputchar('h');
-  return 0;
-})"sv;
+constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
+                             "fun main()->i64{"
+                             "  return 0;"
+                             "}"sv;
 // constexpr auto tuple = "var b = (5 - 2 + 2, \"3\", '3')"sv;
 int main() {
   uint count = 0;
   self::Context c;
-  for (const auto &file : {int_test, FunctionDef, expr, deref, struct_test,
+  for (const auto &file : {import_test, FunctionDef, expr, deref, struct_test,
                            nesting, VarDeclaration, foward_decl}) {
     fmt::print("Test {}:\n", count++);
     auto results = self::lex(std::string(file), c);

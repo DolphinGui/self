@@ -10,6 +10,7 @@
 #include <functional>
 #include <initializer_list>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -24,6 +25,8 @@ constexpr auto ctr_lambda = [](auto &&in, detail::BuiltinInstruction hash) {
 struct TypeType : Type {
   TokenView name;
   TypeType(TokenView n) : name(n) {}
+  TypeType(TypeType &&) = delete;
+  TypeType(const TypeType &) = delete;
   TokenView getTypename() const noexcept override { return name; }
   bool operator==(const TypeType &other) const noexcept {
     return name == other.name;
@@ -36,13 +39,14 @@ inline auto operator<<(std::ostream &out, BuiltinTypeRef in) {
 struct Context {
   Context() {
     for (const auto &type : std::initializer_list<BuiltinTypeRef>{
-             type_t, i64_t, char_t, f64_t, void_t, str_t, bool_t}) {
+             type_t, i64_t, char_t, f64_t, void_t, str_t, bool_t, u64_t}) {
       internal_type_map.insert({type.get().getTypename(), std::cref(type)});
     }
   };
   Context(const Context &) = delete;
   const TypeType type_t = TypeType("type");
   const TypeType i64_t = TypeType("i64");
+  const TypeType u64_t = TypeType("u64");
   const TypeType char_t = TypeType("char");
   const TypeType f64_t = TypeType("f64");
   const TypeType void_t = TypeType("void");
@@ -81,9 +85,7 @@ struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
     return c.internal_type_map.contains(t);
   }
   static BuiltinTypeLit get(TokenView t, Context &c) {
-    auto b = c.internal_type_map.at(t).get();
-    auto result = BuiltinTypeLit(c.internal_type_map.at(t), c);
-    return result;
+    return BuiltinTypeLit(c.internal_type_map.at(t), c);
   }
 
   ExprPtr clone() const override {
@@ -93,8 +95,8 @@ struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
     out << value.get().getTypename();
   }
 };
-struct IntLit : public LiteralImpl<size_t, IntLit> {
-  IntLit(size_t val, Context &c) : LiteralImpl(val, c.i64_t) {}
+struct IntLit : public LiteralImpl<int64_t, IntLit> {
+  IntLit(int64_t val, Context &c) : LiteralImpl(val, c.i64_t) {}
 };
 struct CharLit : public LiteralImpl<unsigned char, CharLit> {
   CharLit(unsigned char val, Context &c) : LiteralImpl(val, c.char_t) {}
@@ -113,6 +115,13 @@ struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
     for (char c : value) {
       out << c;
     }
+  }
+
+  explicit operator std::string() const {
+    std::string result;
+    result.reserve(value.size());
+    std::copy(value.cbegin(), value.cend(), std::back_inserter(result));
+    return result;
   }
 
   inline TokenView getName() const noexcept override {

@@ -2,7 +2,10 @@
 #include <bits/iterator_concepts.h>
 #include <cctype>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -11,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -25,6 +29,7 @@
 #include "ast/unevaluated_expression.hpp"
 #include "ast/variables.hpp"
 #include "builtins.hpp"
+#include "ffi_parse.hpp"
 #include "lexer.hpp"
 #include "literals.hpp"
 #include "pair_range.hpp"
@@ -128,8 +133,7 @@ struct GlobalParser {
     }
   }
 
-  static void processSubtrees(self::ExprTree &tree, auto begin,
-                              auto end) {
+  static void processSubtrees(self::ExprTree &tree, auto begin, auto end) {
     for (auto open = begin; open != end; ++open) {
       if (auto *open_paren =
               dynamic_cast<self::UnevaluatedExpression *>(open->get());
@@ -194,7 +198,7 @@ struct GlobalParser {
   }
 
   enum struct coerce_result { match, coerce, mismatch };
-  coerce_result need_coerce(const self::ExprBase *e, self::TypePtr type) {
+  coerce_result needCoerce(const self::ExprBase *e, self::TypePtr type) {
     using enum coerce_result;
     if (const auto *var = dynamic_cast<const self::VarDeclaration *>(e)) {
       if (!var->type_ref.ptr) {
@@ -288,9 +292,9 @@ struct GlobalParser {
         *it = std::move(result);
       }
     }
-  };
-  self::ExprPtr evaluateTree(self::ExprTree &tree,
-                                   self::SymbolMap &local) {
+  }
+
+  self::ExprPtr evaluateTree(self::ExprTree &tree, self::SymbolMap &local) {
     if (tree.empty()) {
       return std::make_unique<self::Tuple>();
     }
@@ -314,7 +318,9 @@ struct GlobalParser {
              auto &perfect, auto& less_than) {
             if (fun->argcount() == tuple_count(rhs->get())) {
               perfect.push_back(fun);
+              return true;
             }
+            return false;
           },
           [&](auto lhs, auto rhs) { tree.erase(rhs); },
           [&](const self::FunctionDef *fun, auto lhs, auto rhs) {
@@ -338,13 +344,16 @@ struct GlobalParser {
     auto binCondition = [&](auto *op, auto lhs, auto rhs, auto &no_coerce,
                             auto &coerce_r) {
       using enum coerce_result;
-      auto left = need_coerce(lhs->get(), op->rhs->getDecltype());
-      auto right = need_coerce(rhs->get(), op->rhs->getDecltype());
+      auto left = needCoerce(lhs->get(), op->rhs->getDecltype());
+      auto right = needCoerce(rhs->get(), op->rhs->getDecltype());
       if (left == match && right == match) {
         no_coerce.push_back(op);
+        return true;
       } else if (left != mismatch && right != mismatch) {
         coerce_r.push_back(op);
+        return true;
       }
+      return false;
     };
     auto binInsert = [](const self::OperatorDef *o, auto lhs, auto rhs) {
       auto result = std::make_unique<self::FunctionCall>(*o);
@@ -389,9 +398,8 @@ struct GlobalParser {
     return self::foldExpr(std::move(tree.back()), local, global).first;
   }
 
-  self::ExprPtr parseSymbol(self::ExprPtr &base,
-                                  self::SymbolMap &local,
-                                  self::SymbolMap &global) {
+  self::ExprPtr parseSymbol(self::ExprPtr &base, self::SymbolMap &local,
+                            self::SymbolMap &global) {
     if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(base.get());
         maybe && !maybe->isComplete()) {
       auto t = maybe->getToken();
@@ -432,8 +440,8 @@ struct GlobalParser {
   };
 
   self::ExprPtr parseExpr(TokenIt &t, self::SymbolMap &context,
-                                callback start = nullptr,
-                                conditional endExpr = isEndl) {
+                          callback start = nullptr,
+                          conditional endExpr = isEndl) {
     self::ExprTree tree;
     if (start) {
       start(tree);
@@ -450,7 +458,7 @@ struct GlobalParser {
   }
 
   self::ExprPtr parseVar(TokenIt &t, self::TokenView name,
-                               self::SymbolMap &context) {
+                         self::SymbolMap &context) {
     using namespace self::reserved;
     const auto guard = [this](auto t) {
       if (!notReserved(t)) {
@@ -478,7 +486,7 @@ struct GlobalParser {
   }
 
   self::ExprPtr parseFun(TokenIt &t, self::TokenView name,
-                               self::SymbolMap &context) {
+                         self::SymbolMap &context) {
     auto curr = std::make_unique<self::FunctionDef>(name);
     self::SymbolMap local;
     errReport(*t++ == "(", "\"(\" expected");
@@ -572,8 +580,53 @@ struct GlobalParser {
     }
   }
 
-  self::ExprTree process(TokenIt t) {
-    self::ExprTree syntax_tree;
+  auto fileOpen(std::string_view p) {
+    auto path = std::string(p);
+    auto file = std::fstream(path);
+    errReport(file.good(), "file has failed to open");
+    std::stringstream result;
+    result << file.rdbuf();
+    return result.str();
+  }
+
+  auto tokenize(const auto &path) {
+    auto f = fileOpen(path);
+    return self::detail::parseToken(self::detail::preprocess(f));
+  }
+
+  auto parseStrLit(TokenIt &t, std::string_view err) {
+    self::ExprPtr token = std::make_unique<self::UnevaluatedExpression>(*t);
+    token = parseSymbol(token, global, global);
+    auto *path = dynamic_cast<self::StringLit *>(token.get());
+    errReport(path != nullptr, err);
+    return std::string(*path);
+  }
+
+  auto processImport(TokenIt &t, self::ExprTree &syntax_tree,
+                     self::SymbolMap &global) {
+    auto path = parseStrLit(t, "Import path must be a string literal");
+    ++t;
+    auto f = tokenize(path);
+    process(TokenIt{f}, syntax_tree, global);
+  }
+
+  auto processExtern(TokenIt &t, self::ExprTree &syntax_tree,
+                     self::SymbolMap &context) {
+    auto spec = parseStrLit(t, "extern specification must be a string literal");
+    if (spec == "C") {
+      ++t;
+      errReport(*t++ == self::reserved::import_t,
+                "expected import after extern specification");
+      auto path = parseStrLit(t, "Import path must be a string literal");
+      ++t;
+      self::parseFFI(syntax_tree, context, c, path, "");
+    } else {
+      errReport(false, "unknown extern specification");
+    }
+  }
+
+  void process(TokenIt t, self::ExprTree &syntax_tree,
+               self::SymbolMap &global) {
     using namespace self::reserved;
     while (!t.end()) {
       if (*t == var_t) {
@@ -585,10 +638,19 @@ struct GlobalParser {
         syntax_tree.push_back(parseFun(++t, name, global));
       } else if (notReserved(*t)) {
         syntax_tree.push_back(parseExpr(t, global));
+      } else if (*t == import_t) {
+        processImport(++t, syntax_tree, global);
+      } else if (*t == "extern") {
+        processExtern(++t, syntax_tree, global);
       } else {
         errReport(*t++ == endl, "invalid expression");
       }
     }
+  }
+
+  self::ExprTree process(TokenIt t) {
+    self::ExprTree syntax_tree;
+    process(t, syntax_tree, global);
     return syntax_tree;
   }
 

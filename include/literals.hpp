@@ -52,7 +52,7 @@ inline constexpr TokenView typedef_t = "typedef";
 inline constexpr TokenView typeid_t = "typeid";
 inline constexpr TokenView void_t = "void";
 inline constexpr TokenView while_t = "while";
-inline constexpr TokenView byte_t = "byte";
+inline constexpr TokenView extern_t = "extern";
 constexpr inline auto list = {
     struct_t,      var_t,          fun_t,
     typename_t,    token_t,        return_t,
@@ -69,7 +69,7 @@ constexpr inline auto list = {
     static_cast_t, dynamic_cast_t, reinterpert_cast_t,
     switch_t,      try_t,          typedef_t,
     typeid_t,      void_t,         while_t,
-    byte_t,
+    extern_t,
 };
 constexpr inline auto qualifiers = {
     align_t,  compiletime_t, runtime_t, const_t,  volatile_t, export_t,

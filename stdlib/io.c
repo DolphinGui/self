@@ -7,7 +7,7 @@
 uint64_t selfputchar(unsigned char c) { return fputc((int)c, stdout); }
 
 uint64_t selfputcharerr(unsigned char c) { return fputc((int)c, stderr); }
-uint64_t selfflush() { return fputc('\n', stdout); }
+int64_t selfflush() { return fputc('\n', stdout); }
 
 uint64_t selfprint(str_view s) {
   for (uint64_t i = 0; i != s.size; ++i) {
@@ -29,4 +29,4 @@ uint64_t printmulti(unsigned char c, uint64_t n) {
   }
   return 0;
 }
-uint64_t geterrno() { return errno; }
+int64_t geterrno() { return errno; }

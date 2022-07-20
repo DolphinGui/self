@@ -31,6 +31,7 @@ inline void iterate(auto lambda, auto &&arg, auto &&...args) {
 
 struct FunBase : public ExprBase {
   Token name;
+  Token foreign_name;
   ExprTree body;
   TypePtr return_type = {nullptr};
   detail::BuiltinInstruction internal;
@@ -39,17 +40,31 @@ struct FunBase : public ExprBase {
 
 protected:
   FunBase(TokenView name, bool member = false)
-      : name(name), internal(detail::call), member(member) {}
+      : name(name), internal(detail::call), member(member) {
+    if (name == "__function_main") {
+      foreign_name = "main";
+    }
+  }
 
   FunBase(TokenView name, TypeRef return_type, bool member = false,
           detail::BuiltinInstruction internal = detail::call)
       : name(name), return_type(&return_type.ptr, return_type.is_ref),
-        internal(internal), member(member) {}
+        internal(internal), member(member) {
+    if (name == "__function_main") {
+      foreign_name = "main";
+    }
+  }
 
 public:
   std::string_view getName() const noexcept override { return name; }
   bool isComplete() const noexcept override { return return_type.ptr; }
   virtual std::size_t argcount() const noexcept = 0;
+  std::string_view getForeignName() const noexcept {
+    if (foreign_name.empty())
+      return getName();
+    else
+      return foreign_name;
+  }
 };
 
 class OperatorDef : public FunBase, public NameMangling<OperatorDef> {
@@ -120,7 +135,7 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   }
   std::size_t argcount() const noexcept override { return arguments.size(); }
   std::ostream &print(std::ostream &out) const override {
-    out << "operator " << demangle(name) << "( ";
+    out << "fun " << demangle(name) << "( ";
     for (const auto &arg : arguments) {
       out << *arg << ", ";
     }

@@ -7,6 +7,14 @@
   {
     "type": "gdb",
     "request": "launch",
+    "name": "FFI_test",
+    "target": "./ffi_test",
+    "cwd": "${workspaceRoot}/build",
+    "valuesFormatting": "parseText"
+  },
+  {
+    "type": "gdb",
+    "request": "launch",
     "name": "clang_parse",
     "target": "./clang_parse",
     "cwd": "${workspaceRoot}/build",

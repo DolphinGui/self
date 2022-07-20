@@ -7,7 +7,6 @@ set(STDLIB_SRC ${CMAKE_SOURCE_DIR}/stdlib)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 
 include(FetchContent)
-set(JSON_BuildTests OFF CACHE INTERNAL "")
 
 FetchContent_Declare(json
 URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.tar.xz)
@@ -39,14 +38,6 @@ include_directories(${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 
-# this should be done by llvm_map_components, but it doesn't work
-# for some reason. I'll have to investigate that later.
-execute_process(
-  COMMAND llvm-config --ignore-libllvm --libs all-targets 
-  OUTPUT_VARIABLE TARGET_INFO
-  OUTPUT_STRIP_TRAILING_WHITESPACE)
-llvm_map_components_to_libnames(llvm_libs support core target codegen)
-
 add_library(selfast ${COMPILER_SRC}/ast.cpp ${COMPILER_SRC}/complete_types.cpp)
 target_include_directories(selfast PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfast PROPERTY CXX_STANDARD 20)
@@ -54,7 +45,7 @@ set_property(TARGET selfast PROPERTY CXX_STANDARD 20)
 add_library(selfffi ${COMPILER_SRC}/ast.cpp ${COMPILER_SRC}/ffi_parse.cpp)
 target_include_directories(selfffi PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfffi PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfffi PRIVATE clang)
+target_link_libraries(selfffi PRIVATE clang selfast)
 
 add_library(selfparse ${COMPILER_SRC}/lexer.cpp ${COMPILER_SRC}/fsa_parser.cpp)
 target_include_directories(selfparse PUBLIC ${CMAKE_SOURCE_DIR}/include)
@@ -62,12 +53,11 @@ set_property(TARGET selfparse PROPERTY CXX_STANDARD 20)
 target_link_libraries(selfparse PRIVATE re2::re2 selfast selfffi)
 # target_compile_options(selfparse PUBLIC -fsanitize=address)
 # target_link_options(selfparse PUBLIC -fsanitize=address)
-# For now I haven't been having mem leak issues, and the
-# indirect leak warnings from llvm have been pretty annoying.
+
 add_library(selfgen ${COMPILER_SRC}/codegen.cpp ${COMPILER_SRC}/backend_config.cpp)
 target_include_directories(selfgen PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfgen PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfgen PRIVATE ${llvm_libs} ${TARGET_INFO} selfast)
+target_link_libraries(selfgen PUBLIC LLVM selfast)
 # target_compile_options(selfgen PUBLIC -fsanitize=address)
 # target_link_options(selfgen PUBLIC -fsanitize=address)
 
@@ -92,7 +82,7 @@ target_link_libraries(lex_test selfparse fmt::fmt)
 
 add_executable(IR_test ${CMAKE_SOURCE_DIR}/tests/IR_test.cpp)
 set_property(TARGET IR_test PROPERTY CXX_STANDARD 20)
-target_link_libraries(IR_test ${llvm_libs} fmt::fmt)
+target_link_libraries(IR_test LLVM fmt::fmt)
 
 add_executable(integration_test ${CMAKE_SOURCE_DIR}/tests/integration_test.cpp)
 set_property(TARGET integration_test PROPERTY CXX_STANDARD 20)
@@ -109,5 +99,8 @@ add_executable(clang_parse ${CMAKE_SOURCE_DIR}/tests/clang_parse.cpp)
 set_property(TARGET clang_parse PROPERTY CXX_STANDARD 20)
 # this is not portable but I'll figure something else out later
 target_link_libraries(clang_parse fmt::fmt argh clang)
-# target_compile_options(clang_parse PUBLIC -fsanitize=address)
-# target_link_options(clang_parse PUBLIC -fsanitize=address)
+
+add_executable(ffi_test ${CMAKE_SOURCE_DIR}/tests/ffi_test.cpp)
+set_property(TARGET ffi_test PROPERTY CXX_STANDARD 20)
+target_link_libraries(ffi_test PRIVATE fmt::fmt selfffi)
+target_compile_definitions(ffi_test PRIVATE PROJECT_SOURCE=${CMAKE_SOURCE_DIR})
