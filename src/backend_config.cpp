@@ -14,6 +14,10 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+
 #include <stdexcept>
 
 namespace {
@@ -53,7 +57,11 @@ void use_passes(llvm::Module &module, llvm::TargetMachine *target,
     llvm::errs() << "TargetMachine can't emit a file of this type\n";
     throw std::runtime_error("");
   }
-
+  
+  pass.add(llvm::createInstructionCombiningPass());
+  pass.add(llvm::createReassociatePass());
+  pass.add(llvm::createGVNPass());
+  pass.add(llvm::createCFGSimplificationPass());
   pass.run(module);
   dest.flush();
 }

@@ -9,6 +9,7 @@
 #include <iterator>
 #include <llvm/ADT/APInt.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/CallingConv.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -40,6 +41,13 @@ namespace {
 struct Generator {
   llvm::LLVMContext &context;
   std::unordered_map<std::string, llvm::AllocaInst *> var_map{};
+  llvm::StructType *str_type;
+
+  Generator(llvm::LLVMContext &context) : context(context) {
+    std::array<llvm::Type *, 2> members = {llvm::Type::getInt64Ty(context),
+                                           llvm::PointerType::get(context, 0)};
+    str_type = llvm::StructType::get(context, members);
+  }
 
   void unpackArgs(self::ExprBase *e, auto unary) {
     if (auto *args = dynamic_cast<self::arg_pack *>(e)) {
@@ -70,25 +78,29 @@ struct Generator {
     }
   }
 
-  llvm::Type *getType(const self::Type &t, self::Context &c) {
-
-    if (t.getTypename() == c.i64_t.getTypename()) {
+  llvm::Type *getType(self::TypeRef t, self::Context &c) {
+    if (t.is_ref == self::RefTypes::ref) {
+      return llvm::PointerType::get(context, 0);
+    }
+    if (t == c.i64_t) {
       return llvm::Type::getInt64Ty(context);
     }
-    if (t.getTypename() == c.char_t.getTypename()) {
+    if (t == c.char_t) {
       return llvm::Type::getInt8Ty(context);
     }
-    if (t.getTypename() == c.void_t.getTypename()) {
+    if (t == c.void_t) {
       return llvm::Type::getVoidTy(context);
     }
-    if (t.getTypename() == c.u64_t.getTypename()) {
+    if (t == c.u64_t) {
       return llvm::Type::getInt64Ty(context);
     }
-
+    if (t == c.str_t) {
+      return str_type;
+    }
     throw std::runtime_error("non ints not implemented right now");
   }
   llvm::Type *getType(const self::VarDeclaration &var, self::Context &c) {
-    return getType(*var.type_ref.ptr, c);
+    return getType(var.getDecltype(), c);
   }
   void generateFun(const self::FunBase *fun, llvm::Module &module,
                    self::Context &c) {
@@ -98,10 +110,11 @@ struct Generator {
       arg_types.push_back(getType(*a, c));
     });
 
-    auto type = llvm::FunctionType::get(getType(*fun->return_type.ptr, c),
-                                        arg_types, false);
+    auto type =
+        llvm::FunctionType::get(getType(fun->return_type, c), arg_types, false);
     auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
                                          fun->getForeignName(), module);
+    result->setCallingConv(llvm::CallingConv::C);
     if (fun->body_defined) {
       auto block = llvm::BasicBlock::Create(context, "entry", result);
       auto builder = llvm::IRBuilder<>(context);
@@ -123,8 +136,8 @@ struct Generator {
             arg_types.push_back(getType(*a, c));
           };
       forEachArg(&base.definition, arg_push);
-      type = llvm::FunctionType::get(
-          getType(*base.definition.return_type.ptr, c), arg_types, false);
+      type = llvm::FunctionType::get(getType(base.definition.return_type, c),
+                                     arg_types, false);
     }
     auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
     auto *val = table.lookup(base.definition.getForeignName());
@@ -174,7 +187,6 @@ struct Generator {
   }
 
   llvm::Value *createString(const self::StringLit &str, llvm::Module &m) {
-
     auto arr_type =
         llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
     std::vector<llvm::Constant *> constants;
@@ -183,20 +195,16 @@ struct Generator {
       constants.push_back(
           llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), c));
     });
-    std::array<llvm::Constant *, 2> consts;
-    consts[0] = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context),
+    auto size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context),
                                        str.value.size());
-    consts[1] = llvm::ConstantArray::get(arr_type, constants);
-    auto type = llvm::StructType::get(
-        llvm::Type::getInt64Ty(context),
-        llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size()));
-
-    auto constant = llvm::ConstantStruct::get(type, consts);
+    auto str_constant = llvm::ConstantArray::get(arr_type, constants);
+    auto type =
+        llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
     auto global = new llvm::GlobalVariable(
-        m, type, true, llvm::GlobalVariable::ExternalLinkage, constant);
+        m, type, true, llvm::GlobalVariable::ExternalLinkage, str_constant);
     global->setAlignment(llvm::Align(1));
     global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-    return global;
+    return llvm::ConstantStruct::get(str_type, {size, global});
   }
 
   llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
@@ -248,7 +256,7 @@ std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
                                       llvm::LLVMContext &llvm) {
   auto module =
       std::make_unique<llvm::Module>("todo: make module name meaningful", llvm);
-  auto g = Generator{llvm};
+  auto g = Generator(llvm);
   for (auto &expr : ast) { // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"

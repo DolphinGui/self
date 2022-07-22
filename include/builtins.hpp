@@ -32,17 +32,27 @@ struct TypeType : Type {
     return name == other.name;
   }
 };
-using BuiltinTypeRef = std::reference_wrapper<const TypeType>;
+using BuiltinTypeRef = std::reference_wrapper<const Type>;
 inline auto operator<<(std::ostream &out, BuiltinTypeRef in) {
   out << in.get().getTypename();
 };
 struct Context {
+  std::unordered_map<Token, BuiltinTypeRef> internal_type_map;
+  std::vector<StructDef> foreign_types;
   Context() {
     for (const auto &type : std::initializer_list<BuiltinTypeRef>{
              type_t, i64_t, char_t, f64_t, void_t, str_t, bool_t, u64_t}) {
-      internal_type_map.insert({type.get().getTypename(), std::cref(type)});
+      internal_type_map.insert(
+          {Token(type.get().getTypename()), std::cref(type)});
     }
   };
+  bool insertForeignType(StructDef &&type) {
+    foreign_types.push_back(std::move(type));
+    return internal_type_map
+        .insert({Token(foreign_types.back().identity),
+                 std::cref(static_cast<const Type &>(foreign_types.back()))})
+        .second;
+  }
   Context(const Context &) = delete;
   const TypeType type_t = TypeType("type");
   const TypeType i64_t = TypeType("i64");
@@ -52,7 +62,6 @@ struct Context {
   const TypeType void_t = TypeType("void");
   const TypeType str_t = TypeType("str");
   const TypeType bool_t = TypeType("bool");
-  std::unordered_map<TokenView, BuiltinTypeRef> internal_type_map;
 
   const OperatorDef i64_assignment = OperatorDef(
       "=", i64_t, VarDeclarationPtr("this", TypeRef{i64_t, RefTypes::ref}),
@@ -76,16 +85,24 @@ struct Context {
       OperatorDef("=", TypeRef(type_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(type_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", type_t), detail::assign, true);
+  const OperatorDef str_assignment =
+      OperatorDef("=", TypeRef(str_t, RefTypes::ref),
+                  VarDeclarationPtr("this", TypeRef(str_t, RefTypes::ref)),
+                  VarDeclarationPtr("RHS", str_t), detail::store, true);
+  const OperatorDef char_assignment =
+      OperatorDef("=", TypeRef(char_t, RefTypes::ref),
+                  VarDeclarationPtr("this", TypeRef(char_t, RefTypes::ref)),
+                  VarDeclarationPtr("RHS", char_t), detail::store, true);
 };
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
   // I really need to create a global object
   BuiltinTypeLit(BuiltinTypeRef val, Context &c) : LiteralImpl(val, c.type_t) {}
 
   static bool contains(TokenView t, Context &c) {
-    return c.internal_type_map.contains(t);
+    return c.internal_type_map.contains(Token(t));
   }
   static BuiltinTypeLit get(TokenView t, Context &c) {
-    return BuiltinTypeLit(c.internal_type_map.at(t), c);
+    return BuiltinTypeLit(c.internal_type_map.at(Token(t)), c);
   }
 
   ExprPtr clone() const override {
@@ -108,8 +125,8 @@ struct FloatLit : public LiteralImpl<double, FloatLit> {
   FloatLit(double val, Context &c) : LiteralImpl(val, c.f64_t) {}
 };
 struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
-  StringLit(std::string_view s, Context &c)
-      : LiteralImpl(string_converter(s), c.str_t) {}
+  StringLit(std::vector<unsigned char> s, Context &c)
+      : LiteralImpl(s, c.str_t) {}
 
   inline void printval(std::ostream &out) const {
     for (char c : value) {
@@ -126,16 +143,7 @@ struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
 
   inline TokenView getName() const noexcept override {
     return "Literal string";
-  };
-
-private:
-  static constexpr auto string_converter =
-      [](std::string_view s) -> std::vector<unsigned char> {
-    std::vector<unsigned char> result;
-    result.reserve(s.size());
-    std::for_each(s.cbegin(), s.cend(), [&](char c) { result.push_back(c); });
-    return result;
-  };
+  }
 };
 
 struct BoolLit : public LiteralImpl<bool, BoolLit> {

@@ -42,47 +42,55 @@ auto isInt(self::TokenView t) {
   return std::pair{*p == 0, number};
 }
 
-void escape(self::Token &literal) {
+void escape(std::vector<unsigned char> &literal) {
   for (auto c = literal.begin(); c != literal.end(); ++c) {
     if (*c == '\\') {
       auto mark = c;
       ++c;
       if (std::isdigit(*c)) {
         char *end;
-        auto value = std::strtol(&*c, &end, 10);
+        auto value = std::strtol(reinterpret_cast<const char *>(&*c), &end, 10);
         if (value > std::numeric_limits<unsigned char>::max()) {
           throw std::runtime_error("escaped char value is too big.");
         }
         // this is a stupid workaround but I guess it'll work
-        auto distance = std::distance(&*c, end);
-        literal.erase(c, c + 1 + distance);
+        auto distance = std::distance(reinterpret_cast<char *>(&*c), end);
+        c = --literal.erase(c, c + 1 + distance);
         *mark = value;
       } else if (*c == 'n') {
         *mark = '\n';
-        literal.erase(c);
+        c = --literal.erase(c);
       }
     }
   }
+  literal.erase(literal.begin() + literal.size() - 1);
+  literal.erase(literal.begin());
 }
 
 auto isChar(self::TokenView t) {
   if (t.front() != '\'')
     return std::pair{false, (unsigned char)'\0'};
   auto literal = std::string(t);
-  escape(literal);
   if (literal.length() != 3)
     return std::pair{false, (unsigned char)'\0'};
   return std::pair{true, (unsigned char)literal.at(1)};
 }
 
-std::pair<bool, std::string> isStr(self::TokenView t) {
+std::vector<unsigned char> convertString(std::string_view s) {
+  std::vector<unsigned char> result;
+  result.reserve(s.size());
+  std::for_each(s.cbegin(), s.cend(), [&](char c) { result.push_back(c); });
+  return result;
+}
+
+std::pair<bool, std::vector<unsigned char>> isStr(self::TokenView t) {
   if (t.front() != '\'' && t.front() != '\"')
-    return {false, ""};
+    return {false, {}};
   if (!t.ends_with('\'') && !t.ends_with('\"'))
-    return {false, ""};
-  auto literal = std::string(t);
+    return {false, {}};
+  auto literal = convertString(t);
   escape(literal);
-  return {true, std::string(literal.substr(1, literal.length() - 2))};
+  return {true, literal};
 }
 
 std::pair<bool, bool> isBool(self::TokenView t) {
@@ -218,6 +226,8 @@ struct GlobalParser {
     if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
       if (!var->type_ref.ptr) {
         var->type_ref = type;
+        // figure out how to not hardcode this later.
+        var->type_ref.is_ref = self::RefTypes::value;
         return true;
       }
     } else if (auto *uneval = dynamic_cast<self::UnevaluatedExpression *>(e)) {
@@ -619,7 +629,7 @@ struct GlobalParser {
                 "expected import after extern specification");
       auto path = parseStrLit(t, "Import path must be a string literal");
       ++t;
-      self::parseFFI(syntax_tree, context, c, path, "");
+      self::parseFFI(syntax_tree, context, c, path, "-O2");
     } else {
       errReport(false, "unknown extern specification");
     }
@@ -655,15 +665,17 @@ struct GlobalParser {
   }
 
   GlobalParser(self::Context &c) : c(c) {
-    const auto symbolInserter = [this](const self::ExprBase &expr) {
+    const auto insertSymbol = [this](const self::ExprBase &expr) {
       global.insert({expr.getName(), std::cref(expr)});
     };
-    symbolInserter(c.i64_assignment);
-    symbolInserter(c.addi);
-    symbolInserter(c.subi);
-    symbolInserter(c.muli);
-    symbolInserter(c.divi);
-    symbolInserter(c.struct_assignment);
+    insertSymbol(c.i64_assignment);
+    insertSymbol(c.addi);
+    insertSymbol(c.subi);
+    insertSymbol(c.muli);
+    insertSymbol(c.divi);
+    insertSymbol(c.struct_assignment);
+    insertSymbol(c.str_assignment);
+    insertSymbol(c.char_assignment);
   }
 };
 } // namespace

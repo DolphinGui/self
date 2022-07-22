@@ -77,8 +77,9 @@ void listArg(CXCursor cursor, CXClientData c) {
 int main() {
   Context c;
   CXIndex index = clang_createIndex(0, 0);
-  CXTranslationUnit unit = clang_parseTranslationUnit(
-      index, path, nullptr, 0, nullptr, 0, CXTranslationUnit_None);
+  CXTranslationUnit unit =
+      clang_parseTranslationUnit(index, path, nullptr, 0, nullptr, 0,
+                                 CXTranslationUnit_SkipFunctionBodies);
   if (unit == nullptr) {
     fmt::print(stderr, "Unable to parse translation unit. Quitting.\n");
     std::exit(-1);

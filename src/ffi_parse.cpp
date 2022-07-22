@@ -3,12 +3,14 @@
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 #include "ast/functions.hpp"
+#include "ast/struct_def.hpp"
 #include "ast/variables.hpp"
 
 #include <clang-c/Index.h>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -41,23 +43,64 @@ struct Data {
   self::Context &context;
 };
 
-self::TypeRef getType(CXType type, self::Context &c) {
-  auto t = convertString(clang_getTypeSpelling(type));
-  if (t == "int64_t")
-    return c.i64_t;
-  else if (t == "unsigned char")
-    return c.char_t;
-  else if (t == "uint64_t")
-    return c.u64_t;
-  throw std::runtime_error("type not found");
+auto getCursorName(CXCursor c) {
+  return convertString(clang_getCursorSpelling(c));
 }
+
+self::TypePtr getTypePtr(CXType type, self::Context &c) {
+  auto name = convertString(clang_getTypeSpelling(type));
+  self::RefTypes value_type = self::RefTypes::value;
+  if (type.kind == CXTypeKind::CXType_Pointer) {
+    value_type = self::RefTypes::ref;
+    auto n = clang_getTypeDeclaration(clang_getPointeeType(type));
+    name = convertString(clang_getTypeSpelling(clang_getCursorType(n)));
+  }
+  if (name == "int64_t")
+    return {&c.i64_t, value_type};
+  else if (name == "uchar")
+    return {&c.char_t, value_type};
+  else if (name == "uint64_t")
+    return {&c.u64_t, value_type};
+  else if (name == "struct セルフprimative_strview" ||
+           name == "セルフprimative_strview") {
+    return {&c.str_t, value_type};
+  }
+  return nullptr;
+}
+
+self::TypeRef getType(CXType type, self::Context &c) {
+  auto result = getTypePtr(type, c);
+  if (!result.ptr)
+    throw std::runtime_error("Type not found");
+  else
+    return result;
+}
+
 auto addArg(CXCursor cursor, self::FunctionDef &fun, self::Context &c) {
-  auto name = convertString(clang_getCursorSpelling(cursor));
+  auto name = getCursorName(cursor);
   fun.arguments.push_back(std::make_unique<self::VarDeclaration>(
       name, getType(clang_getCursorType(cursor), c)));
   return CXChildVisit_Continue;
 }
-
+struct Data2 {
+  self::StructDef &s;
+  self::Context &c;
+};
+auto addStructMember(CXCursor cursor, CXCursor parent, CXClientData d) {
+  auto &data = *static_cast<Data2 *>(d);
+  auto kind = clang_getCursorKind(cursor);
+  auto par = clang_getCursorKind(parent);
+  switch (clang_getCursorKind(cursor)) {
+  case CXCursor_FieldDecl: {
+    data.s.body.push_back(std::make_unique<self::VarDeclaration>(
+        getCursorName(cursor), getType(clang_getCursorType(cursor), data.c)));
+    break;
+  }
+  default:
+    throw std::runtime_error("unhandled member type");
+  }
+  return CXChildVisit_Continue;
+}
 } // namespace
 
 namespace self {
@@ -73,6 +116,7 @@ void parseFFI(ExprTree &in, SymbolMap &context, Context &c,
     throw std::runtime_error("FFI parsing error");
   }
   CXCursor cursor = clang_getTranslationUnitCursor(unit);
+
   Data d = {in, context, c};
   clang_visitChildren(
       cursor,
@@ -81,7 +125,8 @@ void parseFFI(ExprTree &in, SymbolMap &context, Context &c,
         Data &data = *static_cast<Data *>(d);
         switch (clang_getCursorKind(cursor)) {
         case CXCursor_FunctionDecl: {
-          auto name = convertString(clang_getCursorSpelling(cursor));
+          auto name = getCursorName(cursor);
+
           auto f = std::make_unique<self::FunctionDef>(name, false);
           f->foreign_name = convertString(clang_Cursor_getMangling(cursor));
           auto argc = clang_Cursor_getNumArguments(cursor);
@@ -92,6 +137,19 @@ void parseFFI(ExprTree &in, SymbolMap &context, Context &c,
           }
           data.symbols.insert({f->getName(), std::cref(*f)});
           data.tree.push_back(std::move(f));
+          break;
+        }
+        case CXCursor_StructDecl: {
+          auto builtin = getTypePtr(clang_getCursorType(cursor), data.context);
+          auto kind = clang_getCursorKind(cursor);
+          if (!builtin.ptr) {
+            StructDef s;
+            s.identity = getCursorName(cursor);
+            Data2 d = {s, data.context};
+            clang_visitChildren(cursor, &addStructMember, &d);
+            data.context.insertForeignType(std::move(s));
+          }
+          break;
         }
         default:
           break;
