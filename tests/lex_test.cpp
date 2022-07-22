@@ -10,8 +10,8 @@ constexpr auto deref = "var a = 5; var b = a"sv;
 constexpr auto VarDeclaration = "var a: i64"sv;
 constexpr auto expr = "var a = 1 + ((2 - 5 + 6) / 3) * 2"sv;
 constexpr auto FunctionDef = "fun main()->i64{return 0;}"sv;
-constexpr auto foward_decl = "fun function()->char;"sv;
-constexpr auto struct_test = "var b = i64;var a = struct{var a: char;}"sv;
+constexpr auto foward_decl = "fun function()->i64;"sv;
+constexpr auto struct_test = "var b = i64;var a = struct{var a: i64;}"sv;
 constexpr auto nesting = "var a = struct{fun a()->i64{return 22;}}"sv;
 constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
                              "fun main()->i64{"

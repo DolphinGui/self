@@ -85,9 +85,6 @@ struct Generator {
     if (t == c.i64_t) {
       return llvm::Type::getInt64Ty(context);
     }
-    if (t == c.char_t) {
-      return llvm::Type::getInt8Ty(context);
-    }
     if (t == c.void_t) {
       return llvm::Type::getVoidTy(context);
     }
@@ -223,9 +220,6 @@ struct Generator {
           llvm::Type::getInt64Ty(context),
           llvm::APInt(64, dynamic_cast<const self::IntLit &>(*expr).value,
                       true));
-    } else if (auto character = dynamic_cast<const self::CharLit *>(expr)) {
-      return llvm::ConstantInt::get(llvm::Type::getInt8Ty(context),
-                                    llvm::APInt(8, character->value));
     } else if (type == typeid(self::StringLit)) {
       auto &str = dynamic_cast<const self::StringLit &>(*expr);
       return createString(str, *builder.GetInsertBlock()->getModule());

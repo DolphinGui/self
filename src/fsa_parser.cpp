@@ -67,15 +67,6 @@ void escape(std::vector<unsigned char> &literal) {
   literal.erase(literal.begin());
 }
 
-auto isChar(self::TokenView t) {
-  if (t.front() != '\'')
-    return std::pair{false, (unsigned char)'\0'};
-  auto literal = std::string(t);
-  if (literal.length() != 3)
-    return std::pair{false, (unsigned char)'\0'};
-  return std::pair{true, (unsigned char)literal.at(1)};
-}
-
 std::vector<unsigned char> convertString(std::string_view s) {
   std::vector<unsigned char> result;
   result.reserve(s.size());
@@ -415,9 +406,6 @@ struct GlobalParser {
       auto t = maybe->getToken();
       if (auto [is_int, number] = isInt(t); is_int) {
         return std::make_unique<self::IntLit>(number, c);
-
-      } else if (auto [result, ch] = isChar(t); result) {
-        return std::make_unique<self::CharLit>(ch, c);
       } else if (auto [result, str] = isStr(t); result) {
         return std::make_unique<self::StringLit>(str, c);
       } else if (auto [result, boolean] = isBool(t); result) {
@@ -675,7 +663,6 @@ struct GlobalParser {
     insertSymbol(c.divi);
     insertSymbol(c.struct_assignment);
     insertSymbol(c.str_assignment);
-    insertSymbol(c.char_assignment);
   }
 };
 } // namespace

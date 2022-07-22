@@ -57,8 +57,6 @@ self::TypePtr getTypePtr(CXType type, self::Context &c) {
   }
   if (name == "int64_t")
     return {&c.i64_t, value_type};
-  else if (name == "uchar")
-    return {&c.char_t, value_type};
   else if (name == "uint64_t")
     return {&c.u64_t, value_type};
   else if (name == "struct セルフprimative_strview" ||

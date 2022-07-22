@@ -17,10 +17,8 @@
 // not necessary.
 constexpr auto file = "extern \"C\" import \"../stdlib/include/io.h\""
                       "fun main()->i64{"
-                      "  var a = \"hafasd\\n\";"
+                      "  var a = \"hello world!\\n\";"
                       "  selfprint(a);"
-                      "  var d = '2';"
-                      "  var e = pointertest(d);"
                       "  return 0;"
                       "}";
 constexpr auto path = "a.o";

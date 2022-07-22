@@ -41,7 +41,7 @@ struct Context {
   std::vector<StructDef> foreign_types;
   Context() {
     for (const auto &type : std::initializer_list<BuiltinTypeRef>{
-             type_t, i64_t, char_t, f64_t, void_t, str_t, bool_t, u64_t}) {
+             type_t, i64_t, f64_t, void_t, str_t, bool_t, u64_t}) {
       internal_type_map.insert(
           {Token(type.get().getTypename()), std::cref(type)});
     }
@@ -57,7 +57,6 @@ struct Context {
   const TypeType type_t = TypeType("type");
   const TypeType i64_t = TypeType("i64");
   const TypeType u64_t = TypeType("u64");
-  const TypeType char_t = TypeType("char");
   const TypeType f64_t = TypeType("f64");
   const TypeType void_t = TypeType("void");
   const TypeType str_t = TypeType("str");
@@ -89,10 +88,6 @@ struct Context {
       OperatorDef("=", TypeRef(str_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(str_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", str_t), detail::store, true);
-  const OperatorDef char_assignment =
-      OperatorDef("=", TypeRef(char_t, RefTypes::ref),
-                  VarDeclarationPtr("this", TypeRef(char_t, RefTypes::ref)),
-                  VarDeclarationPtr("RHS", char_t), detail::store, true);
 };
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
   // I really need to create a global object
@@ -114,12 +109,6 @@ struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
 };
 struct IntLit : public LiteralImpl<int64_t, IntLit> {
   IntLit(int64_t val, Context &c) : LiteralImpl(val, c.i64_t) {}
-};
-struct CharLit : public LiteralImpl<unsigned char, CharLit> {
-  CharLit(unsigned char val, Context &c) : LiteralImpl(val, c.char_t) {}
-  inline void printval(std::ostream &out) const {
-    out << '\'' << value << '\'';
-  }
 };
 struct FloatLit : public LiteralImpl<double, FloatLit> {
   FloatLit(double val, Context &c) : LiteralImpl(val, c.f64_t) {}
