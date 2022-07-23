@@ -21,8 +21,8 @@ constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
 int main() {
   uint count = 0;
   self::Context c;
-  for (const auto &file : {import_test, FunctionDef, expr, deref, struct_test,
-                           nesting, VarDeclaration, foward_decl}) {
+  for (const auto &file : {nesting, import_test, FunctionDef, expr, deref,
+                           struct_test, VarDeclaration, foward_decl}) {
     fmt::print("Test {}:\n", count++);
     auto results = self::lex(std::string(file), c);
     for (auto &ex : results) {

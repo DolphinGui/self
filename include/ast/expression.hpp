@@ -3,9 +3,11 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace self {
@@ -88,13 +90,15 @@ template <typename Derive> struct NameMangling {
     auto result = std::string(t);
     return std::string(t.substr(std::strlen(Derive::prefix)));
   }
+  Token getDemangledName() const noexcept {
+    return demangle(static_cast<const Derive &>(*this).getName());
+  }
 };
 using ExprRef = std::reference_wrapper<ExprBase>;
 using ExprConstRef = std::reference_wrapper<const ExprBase>;
 using ExpressionList = std::vector<ExprPtr>;
-using SymbolMap = std::unordered_multimap<self::TokenView, ExprConstRef>;
+using SymbolMap = std::unordered_multimap<TokenView, ExprConstRef>;
+class Index;
 enum struct FullyResolved : bool { Resolved, Unresolved };
-struct Context;
-std::pair<ExprPtr, FullyResolved>
-foldExpr(ExprPtr &&, SymbolMap &local, SymbolMap &global);
+std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&, Index &local);
 } // namespace self

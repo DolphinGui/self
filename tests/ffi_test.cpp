@@ -14,10 +14,9 @@ int main() {
   auto f = fmt::format(flags, STR(PROJECT_SOURCE));
   self::ExprTree tree;
   self::Context c;
-  self::SymbolMap s;
   auto working = std::filesystem::current_path();
   auto ioheader =
       working.parent_path().append("stdlib").append("include").append("io.h");
-  self::parseFFI(tree, s, c, ioheader.c_str(), f);
+  self::parseFFI(tree, c.root, c, ioheader.c_str(), f);
   fmt::print("{}", tree.dump());
 }

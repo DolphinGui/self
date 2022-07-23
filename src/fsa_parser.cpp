@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "ast/Index.hpp"
 #include "ast/control.hpp"
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
@@ -122,7 +123,6 @@ struct GlobalParser {
   // might want to make this a dictionary instead of a list. might scale better
   // for large type lists.
   using TypeList = std::unordered_map<self::TokenView, self::TypeRef>;
-  self::SymbolMap global;
   self::Context &c;
   // todo: add proper compile error reporting later.
   auto errReport(bool condition, std::string_view message) {
@@ -161,8 +161,7 @@ struct GlobalParser {
     return processSubtrees(tree, tree.begin(), tree.end());
   }
 
-  void processTuples(self::ExprTree &tree, self::SymbolMap &context,
-                     self::SymbolMap &global) {
+  void processTuples(self::ExprTree &tree, self::Index &context) {
     size_t size = 0;
     auto tuple = std::make_unique<self::Tuple>();
     auto mark = tree.begin();
@@ -178,8 +177,7 @@ struct GlobalParser {
         if (branch.size() > 1) {
           tuple->members.emplace_back(evaluateTree(branch, context));
         } else {
-          tuple->members.emplace_back(
-              parseSymbol(branch.back(), context, global));
+          tuple->members.emplace_back(parseSymbol(branch.back(), context));
         }
         size = 0;
       }
@@ -188,7 +186,7 @@ struct GlobalParser {
       if (tree.size() > 1) {
         tuple->members.emplace_back(evaluateTree(tree, context));
       } else {
-        tuple->members.emplace_back(parseSymbol(tree.back(), context, global));
+        tuple->members.emplace_back(parseSymbol(tree.back(), context));
         tree.pop_back();
       }
       tuple->members.shrink_to_fit();
@@ -256,28 +254,18 @@ struct GlobalParser {
   template <typename T, bool pre = true, bool post = true>
   auto processFunction(auto &it, bool not_a_member, auto lhsrhsinc, auto cond,
                        auto cleanup, auto insert, auto coerce,
-                       self::SymbolMap &context) {
+                       self::Index &context) {
     if (auto *t = dynamic_cast<self::UnevaluatedExpression *>(it->get())) {
       auto lhs = it, rhs = it;
       lhsrhsinc(lhs, rhs);
       auto candidates =
-          self::pair_range(global.equal_range(T::mangle(t->getToken())));
+          self::pair_range(context.equal_range(T::mangle(t->getToken())));
       std::vector<const T *> no_coerce;
       std::vector<const T *> coerced;
       for (auto &[_, fun] : candidates) {
         const auto &op = dynamic_cast<const T &>(fun.get());
         if (not_a_member ^ op.member) {
           cond(&op, lhs, rhs, no_coerce, coerced);
-        }
-      }
-      if (&global != &context) {
-        auto local_candidates =
-            self::pair_range(context.equal_range(T::mangle(t->getToken())));
-        for (auto &[_, fun] : local_candidates) {
-          const auto &op = dynamic_cast<const T &>(fun.get());
-          if (not_a_member ^ op.member) {
-            cond(&op, lhs, rhs, no_coerce, coerced);
-          }
         }
       }
       if (!no_coerce.empty()) {
@@ -295,7 +283,7 @@ struct GlobalParser {
     }
   }
 
-  self::ExprPtr evaluateTree(self::ExprTree &tree, self::SymbolMap &local) {
+  self::ExprPtr evaluateTree(self::ExprTree &tree, self::Index &local) {
     if (tree.empty()) {
       return std::make_unique<self::Tuple>();
     }
@@ -306,9 +294,9 @@ struct GlobalParser {
       }
     }
     auto a = tree.dump();
-    processTuples(tree, local, global);
+    processTuples(tree, local);
     for (auto &ptr : tree) {
-      ptr = parseSymbol(ptr, local, global);
+      ptr = parseSymbol(ptr, local);
     } // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -396,11 +384,10 @@ struct GlobalParser {
           binInsert, bin_coerce, local);
     }
     errReport(tree.size() == 1, "tree is not fully resolved");
-    return self::foldExpr(std::move(tree.back()), local, global).first;
+    return self::foldExpr(std::move(tree.back()), local).first;
   }
 
-  self::ExprPtr parseSymbol(self::ExprPtr &base, self::SymbolMap &local,
-                            self::SymbolMap &global) {
+  self::ExprPtr parseSymbol(self::ExprPtr &base, self::Index &local) {
     if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(base.get());
         maybe && !maybe->isComplete()) {
       auto t = maybe->getToken();
@@ -415,17 +402,10 @@ struct GlobalParser {
             self::BuiltinTypeLit::get(t, c));
       } else if (auto varname = self::VarDeclaration::mangle(t);
                  local.contains(varname)) {
-        errReport(local.count(varname) == 1,
-                  "ODR var declaration rule violated");
+        errReport(local.isUnique(varname), "ODR var declaration rule violated");
         return std::make_unique<self::VarDeref>(
             dynamic_cast<const self::VarDeclaration &>(
-                local.find(varname)->second.get()));
-      } else if (global.contains(varname)) {
-        errReport(global.count(varname) == 1,
-                  "ODR var declaration rule violated");
-        return std::make_unique<self::VarDeref>(
-            dynamic_cast<const self::VarDeclaration &>(
-                global.find(varname)->second.get()));
+                local.find(varname)->get()));
       }
     }
     return std::move(base);
@@ -437,7 +417,7 @@ struct GlobalParser {
     return t == self::reserved::endl;
   };
 
-  self::ExprPtr parseExpr(TokenIt &t, self::SymbolMap &context,
+  self::ExprPtr parseExpr(TokenIt &t, self::Index &context,
                           callback start = nullptr,
                           conditional endExpr = isEndl) {
     self::ExprTree tree;
@@ -446,7 +426,7 @@ struct GlobalParser {
     }
     while (!endExpr(*t)) {
       if (*t == self::reserved::struct_t) {
-        tree.push_back(parseStruct(++t));
+        tree.push_back(parseStruct(++t, context));
       } else if (*t == self::reserved::var_t) {
       } else {
         tree.push_back(std::make_unique<self::UnevaluatedExpression>(*t++));
@@ -456,7 +436,7 @@ struct GlobalParser {
   }
 
   self::ExprPtr parseVar(TokenIt &t, self::TokenView name,
-                         self::SymbolMap &context) {
+                         self::Index &context) {
     using namespace self::reserved;
     const auto guard = [this](auto t) {
       if (!notReserved(t)) {
@@ -484,9 +464,8 @@ struct GlobalParser {
   }
 
   self::ExprPtr parseFun(TokenIt &t, self::TokenView name,
-                         self::SymbolMap &context) {
-    auto curr = std::make_unique<self::FunctionDef>(name);
-    self::SymbolMap local;
+                         self::Index &parent) {
+    auto curr = std::make_unique<self::FunctionDef>(name, parent);
     errReport(*t++ == "(", "\"(\" expected");
     while (*t != ")") {
       errReport(notReserved(*t),
@@ -497,7 +476,7 @@ struct GlobalParser {
       constexpr auto commaOrParen = [](self::TokenView t) {
         return t == "," || t == ")";
       };
-      auto e = parseExpr(t, context, nullptr, commaOrParen);
+      auto e = parseExpr(t, parent, nullptr, commaOrParen);
       auto type = self::getLiteralType(*e);
       curr->arguments.back()->type_ref = {&type.ptr, type.is_ref};
       errReport(*t == ")" || *t == ",", "\")\" or \",\" expected");
@@ -511,7 +490,7 @@ struct GlobalParser {
       constexpr auto commaOrBracket = [](self::TokenView t) {
         return t == self::reserved::endl || t == "{";
       };
-      auto e = parseExpr(t, context, nullptr, commaOrBracket);
+      auto e = parseExpr(t, parent, nullptr, commaOrBracket);
       auto type = self::getLiteralType(*e);
       curr->return_type = {&type.ptr, type.is_ref};
       curr->body_defined = false;
@@ -521,27 +500,26 @@ struct GlobalParser {
         using namespace self::reserved;
         if (*t == var_t) {
           auto name = *++t;
-          curr->body.push_back(parseVar(++t, name, local));
+          curr->body.push_back(parseVar(++t, name, curr->body.contexts));
         } else if (*t++ == return_t) {
           if (*t != endl) {
             curr->body.push_back(
-                std::make_unique<self::Ret>(parseExpr(t, local)));
+                std::make_unique<self::Ret>(parseExpr(t, curr->body.contexts)));
           } else {
             curr->body.push_back(std::make_unique<self::Ret>());
           }
         } else if (notReserved(*t)) {
-          curr->body.push_back(parseExpr(t, local));
+          curr->body.push_back(parseExpr(t, curr->body.contexts));
         }
       }
       curr->body_defined = true;
     }
     ++t;
-    context.insert({curr->name, *curr});
+    parent.insert({curr->name, *curr});
     return curr;
   }
 
-  self::ExprPtr parseStruct(TokenIt &t) {
-    self::SymbolMap context;
+  self::ExprPtr parseStruct(TokenIt &t, self::Index &parent) {
     static unsigned int id = 0;
     auto identity = std::string("struct");
     identity.append(std::to_string(id++));
@@ -558,15 +536,15 @@ struct GlobalParser {
                                                  c);
       }
     } else {
-      auto result = self::StructDef();
+      auto result = self::StructDef(parent);
       while (*t != "}") {
         if (*(++t) == "var") {
           auto name = *++t;
-          result.body.push_back(parseVar(++t, name, context));
+          result.body.push_back(parseVar(++t, name, result.context));
         } else if (*t == "fun") {
           auto name = *++t;
           errReport(notReserved(name), "function name is reserved");
-          result.body.push_back(parseFun(++t, name, context));
+          result.body.push_back(parseFun(++t, name, result.context));
         } else {
           errReport(*t != self::reserved::endl,
                     "expected a function or variable declaration.");
@@ -593,15 +571,17 @@ struct GlobalParser {
   }
 
   auto parseStrLit(TokenIt &t, std::string_view err) {
-    self::ExprPtr token = std::make_unique<self::UnevaluatedExpression>(*t);
-    token = parseSymbol(token, global, global);
-    auto *path = dynamic_cast<self::StringLit *>(token.get());
-    errReport(path != nullptr, err);
-    return std::string(*path);
+    auto [a, b] = isStr(*t);
+    errReport(a, err);
+    std::string unconvert;
+    unconvert.reserve(b.size());
+    std::for_each(b.begin(), b.end(),
+                  [&](unsigned char c) { unconvert.push_back(c); });
+    return unconvert;
   }
 
   auto processImport(TokenIt &t, self::ExprTree &syntax_tree,
-                     self::SymbolMap &global) {
+                     self::Index &global) {
     auto path = parseStrLit(t, "Import path must be a string literal");
     ++t;
     auto f = tokenize(path);
@@ -609,7 +589,7 @@ struct GlobalParser {
   }
 
   auto processExtern(TokenIt &t, self::ExprTree &syntax_tree,
-                     self::SymbolMap &context) {
+                     self::Index &context) {
     auto spec = parseStrLit(t, "extern specification must be a string literal");
     if (spec == "C") {
       ++t;
@@ -623,8 +603,7 @@ struct GlobalParser {
     }
   }
 
-  void process(TokenIt t, self::ExprTree &syntax_tree,
-               self::SymbolMap &global) {
+  void process(TokenIt t, self::ExprTree &syntax_tree, self::Index &global) {
     using namespace self::reserved;
     while (!t.end()) {
       if (*t == var_t) {
@@ -648,22 +627,11 @@ struct GlobalParser {
 
   self::ExprTree process(TokenIt t) {
     self::ExprTree syntax_tree;
-    process(t, syntax_tree, global);
+    process(t, syntax_tree, c.root);
     return syntax_tree;
   }
 
-  GlobalParser(self::Context &c) : c(c) {
-    const auto insertSymbol = [this](const self::ExprBase &expr) {
-      global.insert({expr.getName(), std::cref(expr)});
-    };
-    insertSymbol(c.i64_assignment);
-    insertSymbol(c.addi);
-    insertSymbol(c.subi);
-    insertSymbol(c.muli);
-    insertSymbol(c.divi);
-    insertSymbol(c.struct_assignment);
-    insertSymbol(c.str_assignment);
-  }
+  GlobalParser(self::Context &c) : c(c) {}
 };
 } // namespace
 

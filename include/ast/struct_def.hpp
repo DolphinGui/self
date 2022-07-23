@@ -12,11 +12,15 @@
 namespace self {
 struct StructDef : public ExprImpl<StructDef>, Type {
   std::string identity;
+  Index context;
   ExprTree body;
 
-  StructDef() = default;
-  StructDef(StructDef &&) = default;
-  StructDef(const StructDef &other) : identity(other.identity) {
+  StructDef(Index &parent) : context(parent) {}
+  StructDef(StructDef &&other)
+      : identity(std::move(other.identity)), context(std::move(other.context)),
+        body(std::move(other.body)){};
+  StructDef(const StructDef &other)
+      : identity(other.identity), context(other.context) {
     std::for_each(other.body.cbegin(), other.body.cend(),
                   [&](const ExprPtr &e) { body.push_back(e->clone()); });
   }

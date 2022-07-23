@@ -32,28 +32,34 @@ inline void iterate(auto lambda, auto &&arg, auto &&...args) {
 struct FunBase : public ExprBase {
   Token name;
   Token foreign_name;
-  ExprTree body;
+  Block body;
   TypePtr return_type = {nullptr};
   detail::BuiltinInstruction internal;
   bool member = false;
   bool body_defined = false;
 
 protected:
-  FunBase(TokenView name, bool member = false)
-      : name(name), internal(detail::call), member(member) {
+  FunBase(TokenView name, Index &parent, bool member = false)
+      : name(name), body(parent), internal(detail::call), member(member) {
     if (name == "__function_main") {
       foreign_name = "main";
     }
   }
 
-  FunBase(TokenView name, TypeRef return_type, bool member = false,
+  FunBase(TokenView name, TypeRef return_type, Index &parent,
+          bool member = false,
           detail::BuiltinInstruction internal = detail::call)
-      : name(name), return_type(&return_type.ptr, return_type.is_ref),
-        internal(internal), member(member) {
+      : name(name), body(parent),
+        return_type(&return_type.ptr, return_type.is_ref), internal(internal),
+        member(member) {
     if (name == "__function_main") {
       foreign_name = "main";
     }
   }
+
+  FunBase(const FunBase &other)
+      : name(other.name), body(other.body), return_type(other.return_type),
+        internal(other.internal), member(other.member) {}
 
 public:
   std::string_view getName() const noexcept override { return name; }
@@ -73,14 +79,13 @@ public:
   std::unique_ptr<VarDeclaration> rhs;
   OperatorDef(TokenView name, TypeRef return_type,
               std::unique_ptr<VarDeclaration> &&LHS,
-              std::unique_ptr<VarDeclaration> &&RHS,
+              std::unique_ptr<VarDeclaration> &&RHS, Index &parent,
               detail::BuiltinInstruction internal = detail::call,
               bool member = false)
-      : FunBase(mangle(name), return_type, member, internal),
+      : FunBase(mangle(name), return_type, parent, member, internal),
         lhs(std::move(LHS)), rhs(std::move(RHS)) {}
   OperatorDef(const OperatorDef &other)
-      : FunBase(other.name, other.return_type, other.member),
-        lhs(std::make_unique<VarDeclaration>(*other.lhs)),
+      : FunBase(other), lhs(std::make_unique<VarDeclaration>(*other.lhs)),
         rhs(std::make_unique<VarDeclaration>(*other.rhs)) {}
   std::size_t argcount() const noexcept override {
     if (!lhs || !rhs)
@@ -114,17 +119,16 @@ public:
 
 struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   std::vector<std::unique_ptr<VarDeclaration>> arguments;
-  FunctionDef(TokenView name, bool member = false)
-      : FunBase(mangle(name), member) {}
-  FunctionDef(TokenView name, TypeRef return_type, bool member = false,
-              auto &&...args)
-      : FunBase(mangle(name), return_type, member, detail::call) {
+  FunctionDef(TokenView name, Index &parent, bool member = false)
+      : FunBase(mangle(name), parent, member) {}
+  FunctionDef(TokenView name, Index &parent, TypeRef return_type,
+              bool member = false, auto &&...args)
+      : FunBase(mangle(name), return_type, parent, member, detail::call) {
     arguments.reserve(sizeof...(args));
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
   }
-  FunctionDef(const FunctionDef &other)
-      : FunBase(other.getName(), other.member) {
+  FunctionDef(const FunctionDef &other) : FunBase(other) {
     std::for_each(other.arguments.cbegin(), other.arguments.cend(),
                   [&](const auto &o) {
                     arguments.push_back(std::make_unique<VarDeclaration>(*o));

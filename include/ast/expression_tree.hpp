@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <memory>
 #include <sstream>
+#include <vector>
 
+#include "ast/Index.hpp"
 #include "ast/expression.hpp"
 
 namespace self {
 struct ExprTree : public ExprImpl<ExprTree>, public ExpressionList {
-  inline std::ostream &print(std::ostream &out) const override {
+  virtual inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
       out << "  " << *e << '\n';
@@ -41,14 +43,27 @@ struct ExprTree : public ExprImpl<ExprTree>, public ExpressionList {
   }
 };
 
-struct Namespace : ExprTree {
+struct Namespace : public ExprTree {
   Token name;
-  
+
   inline std::ostream &print(std::ostream &out) const override {
     out << "namespace " << name << " contents:\n";
     for (const auto &e : *this) {
       out << e << '\n';
     }
+    return out;
+  }
+};
+struct Block : public ExprTree {
+  // this is almost certainly not optimal, but I can't think of anything else
+  Index contexts;
+  Block(Index &i) : contexts(i) {}
+  inline std::ostream &print(std::ostream &out) const override {
+    out << "{ ";
+    for (const auto &e : *this) {
+      out << "  " << *e << '\n';
+    }
+    out << '}';
     return out;
   }
 };

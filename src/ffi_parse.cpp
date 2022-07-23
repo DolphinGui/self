@@ -39,7 +39,7 @@ auto split(std::string &in) {
 }
 struct Data {
   self::ExprTree &tree;
-  self::SymbolMap &symbols;
+  self::Index &symbols;
   self::Context &context;
 };
 
@@ -102,7 +102,7 @@ auto addStructMember(CXCursor cursor, CXCursor parent, CXClientData d) {
 } // namespace
 
 namespace self {
-void parseFFI(ExprTree &in, SymbolMap &context, Context &c,
+void parseFFI(ExprTree &in, Index &context, Context &c,
               std::string_view path, std::string flags) {
   CXIndex index = clang_createIndex(0, 0);
   auto pointers = split(flags);
@@ -125,7 +125,7 @@ void parseFFI(ExprTree &in, SymbolMap &context, Context &c,
         case CXCursor_FunctionDecl: {
           auto name = getCursorName(cursor);
 
-          auto f = std::make_unique<self::FunctionDef>(name, false);
+          auto f = std::make_unique<self::FunctionDef>(name, data.symbols, false);
           f->foreign_name = convertString(clang_Cursor_getMangling(cursor));
           auto argc = clang_Cursor_getNumArguments(cursor);
           auto retType = clang_getResultType(clang_getCursorType(cursor));
@@ -141,7 +141,7 @@ void parseFFI(ExprTree &in, SymbolMap &context, Context &c,
           auto builtin = getTypePtr(clang_getCursorType(cursor), data.context);
           auto kind = clang_getCursorKind(cursor);
           if (!builtin.ptr) {
-            StructDef s;
+            auto s = self::StructDef(data.symbols);
             s.identity = getCursorName(cursor);
             Data2 d = {s, data.context};
             clang_visitChildren(cursor, &addStructMember, &d);

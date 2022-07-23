@@ -38,14 +38,20 @@ inline auto operator<<(std::ostream &out, BuiltinTypeRef in) {
 };
 struct Context {
   std::unordered_map<Token, BuiltinTypeRef> internal_type_map;
+  Index root;
   std::vector<StructDef> foreign_types;
-  Context() {
+  Context() : root(Index::createRoot()) {
     for (const auto &type : std::initializer_list<BuiltinTypeRef>{
              type_t, i64_t, f64_t, void_t, str_t, bool_t, u64_t}) {
       internal_type_map.insert(
           {Token(type.get().getTypename()), std::cref(type)});
     }
-  };
+    for (auto op : std::initializer_list<ExprConstRef>{
+             i64_assignment, addi, subi, muli, divi, cmpi, struct_assignment,
+             str_assignment}) {
+      root.insert({op.get().getName(), op});
+    }
+  }
   bool insertForeignType(StructDef &&type) {
     foreign_types.push_back(std::move(type));
     return internal_type_map
@@ -64,30 +70,30 @@ struct Context {
 
   const OperatorDef i64_assignment = OperatorDef(
       "=", i64_t, VarDeclarationPtr("this", TypeRef{i64_t, RefTypes::ref}),
-      VarDeclarationPtr("RHS", i64_t), detail::store, true);
+      VarDeclarationPtr("RHS", i64_t), root, detail::store, true);
   const OperatorDef addi =
       OperatorDef("+", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t), detail::addi);
+                  VarDeclarationPtr("RHS", i64_t), root, detail::addi);
   const OperatorDef subi =
       OperatorDef("-", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t), detail::subi);
+                  VarDeclarationPtr("RHS", i64_t), root, detail::subi);
   const OperatorDef muli =
       OperatorDef("*", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t), detail::muli);
+                  VarDeclarationPtr("RHS", i64_t), root, detail::muli);
   const OperatorDef divi =
       OperatorDef("/", i64_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t), detail::divi);
+                  VarDeclarationPtr("RHS", i64_t), root, detail::divi);
   const OperatorDef cmpi =
       OperatorDef("==", bool_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t), detail::cmp);
+                  VarDeclarationPtr("RHS", i64_t), root, detail::cmp);
   const OperatorDef struct_assignment =
       OperatorDef("=", TypeRef(type_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(type_t, RefTypes::ref)),
-                  VarDeclarationPtr("RHS", type_t), detail::assign, true);
+                  VarDeclarationPtr("RHS", type_t), root, detail::assign, true);
   const OperatorDef str_assignment =
       OperatorDef("=", TypeRef(str_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(str_t, RefTypes::ref)),
-                  VarDeclarationPtr("RHS", str_t), detail::store, true);
+                  VarDeclarationPtr("RHS", str_t), root, detail::store, true);
 };
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
   // I really need to create a global object

@@ -6,7 +6,7 @@ struct Ret : public ExprImpl<Ret> {
   ExprPtr value;
   Ret(ExprPtr &&val) : value(std::move(val)) {}
   Ret() = default;
-  Ret(const Ret &other) : value(other.clone()) {}
+  Ret(const Ret &other) : value(other.value->clone()) {}
   virtual TokenView getName() const noexcept override { return "return"; }
   inline std::ostream &print(std::ostream &out) const override {
     if (value)
@@ -22,16 +22,16 @@ struct Ret : public ExprImpl<Ret> {
 };
 
 struct If : public ExprImpl<If> {
-  ExprTree block;
+  ExprPtr block;
   ExprPtr condition;
   // This may be another If for a elif
   // or just another ExpressionTree
   ExprPtr else_code;
-  If(ExprTree &&code, ExprPtr &&cond)
+  If(ExprPtr &&code, ExprPtr &&cond)
       : block(std::move(code)), condition(std::move(cond)) {}
   If() = default;
   If(const If &other)
-      : block(other.block), condition(other.condition->clone()) {}
+      : block(other.block->clone()), condition(other.condition->clone()) {}
   virtual TokenView getName() const noexcept override { return "return"; }
   inline std::ostream &print(std::ostream &out) const override {
     out << "if: " << block;
@@ -40,9 +40,7 @@ struct If : public ExprImpl<If> {
     }
     return out;
   }
-  bool isComplete() const noexcept override {
-    return condition && !block.empty();
-  }
+  bool isComplete() const noexcept override { return condition && !block; }
 
   ExprPtr clone() const override { return std::make_unique<If>(*this); }
 };

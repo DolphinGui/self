@@ -229,8 +229,9 @@ struct Generator {
           dynamic_cast<const self::BoolLit &>(*expr).value);
     } else if (type == typeid(self::VarDeclaration)) {
       auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
-      auto result = builder.CreateAlloca(getType(var, c), 0, var.getName());
-      var_map.insert({self::VarDeclaration::demangle(var.getName()), result});
+      auto result =
+          builder.CreateAlloca(getType(var, c), 0, var.getDemangledName());
+      var_map.insert({var.getDemangledName(), result});
       return result;
     } else if (type == typeid(self::VarDeref)) {
       auto var = dynamic_cast<const self::VarDeref &>(*expr);

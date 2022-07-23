@@ -8,25 +8,8 @@
 #include <optional>
 #include <stdexcept>
 
-namespace {
-std::optional<self::ExprConstRef> searchAll(const self::SymbolMap &local,
-                                                  const self::SymbolMap &global,
-                                                  self::TokenView key) {
-  auto a = local.find(key);
-  if (a != local.end())
-    return {a->second};
-  auto b = global.find(key);
-  if (b != global.end())
-    return {b->second};
-  return std::nullopt;
-}
-
-} // namespace
-
 namespace self {
-
-std::pair<ExprPtr, FullyResolved>
-foldExpr(ExprPtr &&e, SymbolMap &local, SymbolMap &global) {
+std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&e, Index &local) {
   using enum FullyResolved;
   if (auto *call = dynamic_cast<FunctionCall *>(e.get())) {
     auto f = std::unique_ptr<FunctionCall>(
@@ -51,7 +34,7 @@ foldExpr(ExprPtr &&e, SymbolMap &local, SymbolMap &global) {
       return {std::move(f), Unresolved};
     }
   } else if (auto *deref = dynamic_cast<VarDeref *>(e.get())) {
-    auto result = searchAll(local, global, deref->getName());
+    auto result = local.find(deref->getName());
     auto var = dynamic_cast<const VarDeclaration *>(&result->get());
     if (dynamic_cast<Literal *>(var->value)) {
       return {e->clone(), Resolved};
