@@ -145,7 +145,8 @@ struct Generator {
     std::vector<llvm::Value *> args;
     args.reserve(base.definition.argcount());
     forEachArg(base, [&](const self::ExprBase &e) {
-      args.push_back(dispatch(&e, builder, c));
+      args.push_back(dispatch(&e, builder, c,
+                              e.getType().is_ref == self::RefTypes::value));
     });
     return builder.CreateCall(callee, args);
   }
@@ -159,7 +160,7 @@ struct Generator {
       break;
     case self::detail::store:
       result = builder.CreateStore(dispatch(fun.rhs.get(), builder, c),
-                                   dispatch(fun.lhs.get(), builder, c));
+                                   dispatch(fun.lhs.get(), builder, c, false));
       break;
     case self::detail::subi:
       result = builder.CreateSub(dispatch(fun.lhs.get(), builder, c),
@@ -177,8 +178,13 @@ struct Generator {
       return generateFunCall(fun, builder, c);
       break;
     case self::detail::assign:
-    case self::detail::cmp:
-      throw std::runtime_error("unimplemented");
+    case self::detail::cmpeq:
+      result = builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder, c),
+                                    dispatch(fun.rhs.get(), builder, c));
+      break;
+    case self::detail::cmpneq:
+      result = builder.CreateICmpNE(dispatch(fun.lhs.get(), builder, c),
+                                    dispatch(fun.rhs.get(), builder, c));
       break;
     default:
       throw std::runtime_error("This shouldn't happen");
@@ -207,30 +213,51 @@ struct Generator {
     return llvm::ConstantStruct::get(str_type, {size, global});
   }
 
-  llvm::Value *createIf(const self::If *expr, llvm::IRBuilder<> &builder,
-                        self::Context &c) {
+  void createWhile(const self::While *while_e, llvm::IRBuilder<> &builder,
+                   self::Context &c) {
+    auto function = builder.GetInsertBlock()->getParent();
+    auto loop = llvm::BasicBlock::Create(context, "while loop", function);
+    auto cont_block = llvm::BasicBlock::Create(context, "after loop");
+    if (while_e->is_do) {
+      builder.CreateBr(loop);
+    } else {
+      builder.CreateCondBr(dispatch(while_e->condition.get(), builder, c), loop,
+                           cont_block);
+    }
+    builder.SetInsertPoint(loop);
+    for (auto &e : *while_e->block) {
+      dispatch(e.get(), builder, c);
+    }
+    builder.CreateCondBr(dispatch(while_e->condition.get(), builder, c), loop,
+                         cont_block);
+    function->getBasicBlockList().push_back(cont_block);
+    builder.SetInsertPoint(cont_block);
+  }
+
+  void createIf(const self::If *if_e, llvm::IRBuilder<> &builder,
+                self::Context &c) {
     auto function = builder.GetInsertBlock()->getParent();
     auto then_block = llvm::BasicBlock::Create(context, "then", function);
     auto cont_block = llvm::BasicBlock::Create(context, "continued");
     llvm::BasicBlock *else_block;
-    if (expr->else_block) {
+    if (if_e->else_block) {
       else_block = llvm::BasicBlock::Create(context, "else");
     } else {
       else_block = cont_block;
     }
-    builder.CreateCondBr(dispatch(expr->condition.get(), builder, c),
+    builder.CreateCondBr(dispatch(if_e->condition.get(), builder, c),
                          then_block, else_block);
     builder.SetInsertPoint(then_block);
-    for (auto &n : *expr->block) {
-      dispatch(n.get(), builder, c);
+    for (auto &e : *if_e->block) {
+      dispatch(e.get(), builder, c);
     }
     builder.CreateBr(cont_block);
     function->getBasicBlockList().push_back(else_block);
 
     if (else_block != cont_block) {
       builder.SetInsertPoint(else_block);
-      for (auto &n : *expr->else_block) {
-        dispatch(n.get(), builder, c);
+      for (auto &e : *if_e->else_block) {
+        dispatch(e.get(), builder, c);
       }
       builder.CreateBr(cont_block);
     }
@@ -239,11 +266,10 @@ struct Generator {
       function->getBasicBlockList().push_back(cont_block);
     }
     builder.SetInsertPoint(cont_block);
-    return nullptr;
   }
 
   llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
-                        self::Context &c) {
+                        self::Context &c, bool return_val = true) {
     if (auto *fun = dynamic_cast<const self::FunctionCall *>(expr)) {
       return generateCall(*fun, builder, c);
     } else if (auto &type = typeid(*expr); type == typeid(self::Ret)) {
@@ -267,15 +293,25 @@ struct Generator {
           dynamic_cast<const self::BoolLit &>(*expr).value);
     } else if (type == typeid(self::VarDeclaration)) {
       auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
-      auto result =
-          builder.CreateAlloca(getType(var, c), 0, var.getDemangledName());
+      auto t = getType(var, c);
+      auto result = builder.CreateAlloca(t, 0, var.getDemangledName());
+      auto t2 = result->getAllocatedType();
+      auto t3 = result->getType();
       var_map.insert({var.getDemangledName(), result});
       return result;
     } else if (type == typeid(self::VarDeref)) {
       auto var = dynamic_cast<const self::VarDeref &>(*expr);
-      return var_map.at(self::VarDeclaration::demangle(var.getName()));
+      auto result = var_map.at(self::VarDeclaration::demangle(var.getName()));
+      if (!return_val)
+        return result;
+      else
+        return builder.CreateLoad(result->getAllocatedType(), result);
     } else if (type == typeid(self::If)) {
-      return createIf(dynamic_cast<const self::If *>(expr), builder, c);
+      createIf(dynamic_cast<const self::If *>(expr), builder, c);
+      return nullptr;
+    } else if (type == typeid(self::While)) {
+      createWhile(dynamic_cast<const self::While *>(expr), builder, c);
+      return nullptr;
     } else {
       std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
                 << '\n';

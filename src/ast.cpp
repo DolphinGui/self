@@ -24,7 +24,7 @@ std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&e, Index &local) {
     case detail::subi:
     case detail::muli:
     case detail::divi:
-    case detail::cmp:
+    case detail::cmpeq:
     default:
       // not sure if there's a point to folding constant arithmetic
       return {std::move(f), Unresolved};

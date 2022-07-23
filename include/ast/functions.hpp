@@ -20,7 +20,8 @@ enum BuiltinInstruction {
   subi,
   muli,
   divi,
-  cmp,
+  cmpeq,
+  cmpneq,
   assign
 };
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }

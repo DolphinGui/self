@@ -49,8 +49,8 @@ struct Context {
           {Token(type.get().getTypename()), std::cref(type)});
     }
     for (auto op : std::initializer_list<ExprConstRef>{
-             i64_assignment, addi, subi, muli, divi, cmpi, struct_assignment,
-             str_assignment, bool_assignment}) {
+             i64_assignment, addi, subi, muli, divi, eqi, neqi,
+             struct_assignment, str_assignment, bool_assignment}) {
       root.insert({op.get().getName(), op});
     }
   }
@@ -85,9 +85,12 @@ struct Context {
   const OperatorDef divi =
       OperatorDef("/", i64_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::divi);
-  const OperatorDef cmpi =
+  const OperatorDef eqi =
       OperatorDef("==", bool_t, VarDeclarationPtr("LHS", i64_t),
-                  VarDeclarationPtr("RHS", i64_t), root, detail::cmp);
+                  VarDeclarationPtr("RHS", i64_t), root, detail::cmpeq);
+  const OperatorDef neqi =
+      OperatorDef("!=", bool_t, VarDeclarationPtr("LHS", i64_t),
+                  VarDeclarationPtr("RHS", i64_t), root, detail::cmpneq);
   const OperatorDef struct_assignment =
       OperatorDef("=", TypeRef(type_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(type_t, RefTypes::ref)),

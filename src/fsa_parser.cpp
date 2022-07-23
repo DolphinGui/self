@@ -430,8 +430,6 @@ struct GlobalParser {
       } else if (*t == self::reserved::var_t) {
         auto name = *++t;
         tree.push_back(parseVar(++t, name, context));
-      } else if (*t == "{") {
-        tree.push_back(std::make_unique<self::Block>(parseBlock(++t, context)));
       } else {
         tree.push_back(std::make_unique<self::UnevaluatedExpression>(*t++));
       }
@@ -472,6 +470,65 @@ struct GlobalParser {
       ++t;
   }
 
+  std::unique_ptr<self::Block> forceBlock(TokenIt &t, self::Block &parent) {
+    // this exists to silence a warning about side-effects in typeid expressions
+    if (*t == "{") {
+      ++t;
+      return std::make_unique<self::Block>(parseBlock(t, parent.contexts));
+    }
+    auto results = std::make_unique<self::Block>(parent.contexts);
+    results->push_back(parseExpr(t, results->contexts));
+    return results;
+  };
+
+  void parseIf(TokenIt &t, self::Block &body) {
+    ++t;
+    auto if_statement = std::make_unique<self::If>();
+
+    if_statement->condition =
+        parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
+          return t == ";" || t == "{";
+        });
+    errReport(if_statement->condition->getType().ptr == &c.bool_t,
+              "if condition expression is supposed to be boolean.");
+    consumeNullExpr(t);
+    if_statement->block = forceBlock(t, body);
+    if (*t.next() == self::reserved::else_t) {
+      ++ ++t;
+      consumeNullExpr(t);
+      if_statement->else_block = forceBlock(t, body);
+    }
+    body.push_back(std::move(if_statement));
+  }
+
+  void parseWhile(TokenIt &t, self::Block &body) {
+    self::ExprPtr condition;
+    if (*t == self::reserved::while_t) {
+      ++t;
+      condition =
+          parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
+            return t == ";" || t == "{";
+          });
+      if (*t == ";")
+        ++t;
+    } else {
+      // assumes *t == "do"
+      ++t;
+    }
+    auto block = forceBlock(t, body);
+    bool is_do = false;
+    if (condition == nullptr) {
+      is_do = true;
+      ++t;
+      errReport(*t == self::reserved::while_t, "expected a 'while' after a do");
+      ++t;
+      condition = parseExpr(t, body.contexts);
+      ++t;
+    }
+    body.push_back(std::make_unique<self::While>(std::move(block),
+                                                 std::move(condition), is_do));
+  }
+
   self::Block parseBlock(TokenIt &t, self::Index &parent) {
     auto body = self::Block(parent);
     while (*t != "}") {
@@ -488,31 +545,9 @@ struct GlobalParser {
           body.push_back(std::make_unique<self::Ret>());
         }
       } else if (*t == if_t) {
-        ++t;
-        auto if_statement = std::make_unique<self::If>();
-        auto forceBlock = [&](self::ExprPtr e) -> std::unique_ptr<self::Block> {
-          if (typeid(*t) == typeid(self::Block)) {
-            return std::unique_ptr<self::Block>(
-                reinterpret_cast<self::Block *>(e.release()));
-          }
-          auto n = std::make_unique<self::Block>(parent);
-          n->push_back(std::move(e));
-          return n;
-        };
-        if_statement->condition =
-            parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
-              return t == ";" || t == "{";
-            });
-        errReport(if_statement->condition->getType().ptr == &c.bool_t,
-                  "if condition expression is supposed to be boolean.");
-        consumeNullExpr(t);
-        if_statement->block = forceBlock(parseExpr(t, body.contexts));
-        if (*t.next() == else_t) {
-          ++ ++t;
-          consumeNullExpr(t);
-          if_statement->else_block = forceBlock(parseExpr(t, body.contexts));
-        }
-        body.push_back(std::move(if_statement));
+        parseIf(t, body);
+      } else if (*t == while_t || *t == do_t) {
+        parseWhile(t, body);
       } else if (notReserved(*t)) {
         body.push_back(parseExpr(t, body.contexts));
       } else {

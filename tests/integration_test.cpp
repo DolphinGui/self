@@ -17,11 +17,14 @@
 // not necessary.
 constexpr auto file = "extern \"C\" import \"../stdlib/include/io.h\"\n"
                       "fun main()->i64{\n"
-                      "  var b = false\n"
-                      "  var c: i64\n"
-                      "  if b; c = 2;else c = 4;"
                       "  var a = \"hello world!\\n\"\n"
-                      "  selfprint(a)\n"
+                      "  var b = randomnumber()\n"
+                      "  var c: i64\n"
+                      "  if b == 6; c = 2;else c = 4;"
+                      "  while b != 0 {"
+                      "    selfprint(a)\n"
+                      "    b = b - 1\n"
+                      "  }"
                       "  return 0\n"
                       "}";
 constexpr auto path = "a.o";
