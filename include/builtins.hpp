@@ -165,6 +165,7 @@ struct BoolLit : public LiteralImpl<bool, BoolLit> {
 struct StructLit : public LiteralImpl<StructDef, StructLit> {
   StructLit(StructDef &&val, Context &c)
       : LiteralImpl(std::move(val), c.type_t) {}
+  inline void printval(std::ostream &out) const { out << value; }
 };
 struct OpaqueLit : public LiteralImpl<OpaqueStruct, OpaqueLit> {
   OpaqueLit(OpaqueStruct &&val, Context &c)

@@ -25,10 +25,10 @@ struct LiteralImpl : public ExprImpl<Derive>, public Literal {
   TypeRef type;
   inline std::ostream &print(std::ostream &out) const override {
     out << "literal: ";
-    if constexpr (std::derived_from<T, self::Type>) {
-      out << value.getTypename();
-    } else if constexpr (detail::hasPrint<Derive>::value) {
+    if constexpr (detail::hasPrint<Derive>::value) {
       static_cast<const Derive &>(*this).printval(out);
+    } else if constexpr (std::derived_from<T, self::Type>) {
+      out << value.getTypename();
     } else {
       out << value;
     }

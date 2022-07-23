@@ -114,6 +114,7 @@ template <typename T> struct TokenItBase {
     this->operator++();
     return tmp;
   }
+  TokenItBase next() const noexcept { return TokenItBase{where, pos + 1}; }
   bool end() const noexcept { return pos == where.size(); }
 };
 using TokenIt = TokenItBase<std::vector<self::Token>>;
@@ -466,6 +467,11 @@ struct GlobalParser {
     }
   }
 
+  void consumeNullExpr(TokenIt &t) {
+    if (*t == self::reserved::endl)
+      ++t;
+  }
+
   self::Block parseBlock(TokenIt &t, self::Index &parent) {
     auto body = self::Block(parent);
     while (*t != "}") {
@@ -484,13 +490,27 @@ struct GlobalParser {
       } else if (*t == if_t) {
         ++t;
         auto if_statement = std::make_unique<self::If>();
-        if_statement->condition =
+        auto forceBlock = [&](self::ExprPtr e) -> self::ExprPtr {
+          if (typeid(*t) == typeid(self::Block)) {
+            return e;
+          }
+          auto n = std::make_unique<self::Block>(parent);
+          n->push_back(std::move(e));
+          return n;
+        };
+        if_statement->condition = 
             parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
               return t == ";" || t == "{";
             });
         errReport(if_statement->condition->getType().ptr == &c.bool_t,
                   "if condition expression is supposed to be boolean.");
-        if_statement->block = parseExpr(t, body.contexts);
+        consumeNullExpr(t);
+        if_statement->block = forceBlock(parseExpr(t, body.contexts));
+        if (*t.next() == else_t) {
+          ++ ++t;
+          consumeNullExpr(t);
+          if_statement->else_block = forceBlock(parseExpr(t, body.contexts));
+        }
         body.push_back(std::move(if_statement));
       } else if (notReserved(*t)) {
         body.push_back(parseExpr(t, body.contexts));
