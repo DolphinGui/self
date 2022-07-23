@@ -1,9 +1,9 @@
 #pragma once
 
 #include "ast/expression_tree.hpp"
+#include "builtins.hpp"
 #include "lexer.hpp"
 
 namespace self {
-ExprTree parse(TokenVec in, Context& c);
-
+Module parse(TokenVec in, Context &c);
 }

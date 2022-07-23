@@ -116,7 +116,7 @@ struct Generator {
       auto block = llvm::BasicBlock::Create(context, "entry", result);
       auto builder = llvm::IRBuilder<>(context);
       builder.SetInsertPoint(block);
-      for (auto &a : fun->body) {
+      for (auto &a : *fun->body) {
         dispatch(a.get(), builder, c);
       }
     }
@@ -124,7 +124,6 @@ struct Generator {
   llvm::Value *generateFunCall(const self::FunctionCall &base,
                                llvm::IRBuilder<> &builder, self::Context &c) {
     llvm::FunctionType *type;
-
     {
       std::vector<llvm::Type *> arg_types;
       arg_types.reserve(base.definition.argcount());

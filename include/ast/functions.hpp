@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 namespace self {
@@ -32,7 +33,7 @@ inline void iterate(auto lambda, auto &&arg, auto &&...args) {
 struct FunBase : public ExprBase {
   Token name;
   Token foreign_name;
-  Block body;
+  std::optional<Block> body;
   TypePtr return_type = {nullptr};
   detail::BuiltinInstruction internal;
   bool member = false;
@@ -105,7 +106,7 @@ public:
       out << " -> " << return_type.ptr->getTypename();
     }
     if (body_defined) {
-      out << '{' << body << '}';
+      out << '{' << *body << '}';
     }
     return out;
   }
@@ -148,7 +149,7 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
       out << " -> " << return_type.ptr->getTypename();
     }
     if (body_defined) {
-      out << '{' << body << '}';
+      out << '{' << *body << '}';
     }
     return out;
   }

@@ -21,14 +21,14 @@ constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
 int main() {
   uint count = 0;
   self::Context c;
-  for (const auto &file : {nesting, import_test, FunctionDef, expr, deref,
-                           struct_test, VarDeclaration, foward_decl}) {
+  for (const auto &file : {struct_test, nesting, import_test, FunctionDef, expr,
+                           deref, VarDeclaration, foward_decl}) {
     fmt::print("Test {}:\n", count++);
     auto results = self::lex(std::string(file), c);
-    for (auto &ex : results) {
+    for (auto &ex : results.ast) {
       std::cout << *ex << '\n';
     }
-    if (results.isComplete()) {
+    if (results.ast.isComplete()) {
       std::cout << "type is complete\n";
     } else {
       std::cout << "type is not complete\n";

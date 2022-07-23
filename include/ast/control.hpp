@@ -26,7 +26,7 @@ struct If : public ExprImpl<If> {
   ExprPtr condition;
   // This may be another If for a elif
   // or just another ExpressionTree
-  ExprPtr else_code;
+  ExprPtr else_block;
   If(ExprPtr &&code, ExprPtr &&cond)
       : block(std::move(code)), condition(std::move(cond)) {}
   If() = default;
@@ -35,13 +35,11 @@ struct If : public ExprImpl<If> {
   virtual TokenView getName() const noexcept override { return "return"; }
   inline std::ostream &print(std::ostream &out) const override {
     out << "if: " << block;
-    if (else_code) {
-      out << "\nelse: " << *else_code;
+    if (else_block) {
+      out << "\nelse: " << *else_block;
     }
     return out;
   }
   bool isComplete() const noexcept override { return condition && !block; }
-
-  ExprPtr clone() const override { return std::make_unique<If>(*this); }
 };
 } // namespace self

@@ -47,7 +47,7 @@ int main() {
   llvm::LLVMContext llvm;
   auto stdlib = get_stdlib();
   auto AST = self::lex(std::string(file), c);
-  auto IR = self::codegen(AST, c, llvm);
+  auto IR = self::codegen(AST.ast, c, llvm);
   std::error_code file_err;
   IR->print(llvm::outs(), nullptr);
   auto aout = llvm::raw_fd_ostream(path, file_err);

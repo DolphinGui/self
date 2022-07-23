@@ -36,7 +36,7 @@ self::TokenVec parseToken(std::string whole) {
   return Token_list;
 }
 } // namespace detail
-ExprTree lex(std::string in, Context &c) {
+Module lex(std::string in, Context &c) {
   return parse(detail::parseToken(detail::preprocess(in)), c);
 }
 } // namespace self

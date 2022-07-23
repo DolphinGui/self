@@ -463,6 +463,30 @@ struct GlobalParser {
     }
   }
 
+  self::Block parseBlock(TokenIt &t, self::Index &parent) {
+    auto body = self::Block(parent);
+    while (*t != "}") {
+      using namespace self::reserved;
+      if (*t == var_t) {
+        auto name = *++t;
+        body.push_back(parseVar(++t, name, body.contexts));
+      } else if (*t == return_t) {
+        ++t;
+        if (*t != endl) {
+          body.push_back(
+              std::make_unique<self::Ret>(parseExpr(t, body.contexts)));
+        } else {
+          body.push_back(std::make_unique<self::Ret>());
+        }
+      } else if (notReserved(*t)) {
+        body.push_back(parseExpr(t, body.contexts));
+      } else {
+        ++t;
+      }
+    }
+    return body;
+  }
+
   self::ExprPtr parseFun(TokenIt &t, self::TokenView name,
                          self::Index &parent) {
     auto curr = std::make_unique<self::FunctionDef>(name, parent);
@@ -496,25 +520,11 @@ struct GlobalParser {
       curr->body_defined = false;
     }
     if (*t == "{") {
-      while (*t != "}") {
-        using namespace self::reserved;
-        if (*t == var_t) {
-          auto name = *++t;
-          curr->body.push_back(parseVar(++t, name, curr->body.contexts));
-        } else if (*t++ == return_t) {
-          if (*t != endl) {
-            curr->body.push_back(
-                std::make_unique<self::Ret>(parseExpr(t, curr->body.contexts)));
-          } else {
-            curr->body.push_back(std::make_unique<self::Ret>());
-          }
-        } else if (notReserved(*t)) {
-          curr->body.push_back(parseExpr(t, curr->body.contexts));
-        }
-      }
+      ++t;
+      curr->body.emplace(parseBlock(t, parent));
       curr->body_defined = true;
+      ++t;
     }
-    ++t;
     parent.insert({curr->name, *curr});
     return curr;
   }
@@ -537,8 +547,9 @@ struct GlobalParser {
       }
     } else {
       auto result = self::StructDef(parent);
+      ++t;
       while (*t != "}") {
-        if (*(++t) == "var") {
+        if (*t == "var") {
           auto name = *++t;
           result.body.push_back(parseVar(++t, name, result.context));
         } else if (*t == "fun") {
@@ -546,8 +557,9 @@ struct GlobalParser {
           errReport(notReserved(name), "function name is reserved");
           result.body.push_back(parseFun(++t, name, result.context));
         } else {
-          errReport(*t != self::reserved::endl,
+          errReport(*t == self::reserved::endl,
                     "expected a function or variable declaration.");
+          ++t;
         }
       }
       ++t;
@@ -625,9 +637,9 @@ struct GlobalParser {
     }
   }
 
-  self::ExprTree process(TokenIt t) {
+  self::ExprTree process(TokenIt t, self::Index &i) {
     self::ExprTree syntax_tree;
-    process(t, syntax_tree, c.root);
+    process(t, syntax_tree, i);
     return syntax_tree;
   }
 
@@ -636,8 +648,10 @@ struct GlobalParser {
 } // namespace
 
 namespace self {
-ExprTree parse(TokenVec in, Context &c) {
+Module parse(TokenVec in, Context &c) {
   auto parser = GlobalParser(c);
-  return parser.process(TokenIt{in});
+  auto root = Index(c.root);
+  auto ast = parser.process(TokenIt{in}, root);
+  return Module(std::move(root), std::move(ast));
 }
 } // namespace self

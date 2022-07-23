@@ -37,6 +37,7 @@ struct ExprTree : public ExprImpl<ExprTree>, public ExpressionList {
   }
   void complete_types();
   ExprTree() = default;
+  ExprTree(ExprTree &&other) : ExpressionList(std::move(other)) {}
   ExprTree(const ExprTree &other) {
     std::for_each(other.cbegin(), other.cend(),
                   [&](const ExprPtr &p) { this->push_back(p->clone()); });
@@ -58,6 +59,9 @@ struct Block : public ExprTree {
   // this is almost certainly not optimal, but I can't think of anything else
   Index contexts;
   Block(Index &i) : contexts(i) {}
+  Block(Block &&other)
+      : ExprTree(std::move(other)), contexts(std::move(other.contexts)) {}
+  Block(const Block &other) : ExprTree(other), contexts(other.contexts) {}
   inline std::ostream &print(std::ostream &out) const override {
     out << "{ ";
     for (const auto &e : *this) {

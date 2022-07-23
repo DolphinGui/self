@@ -1,5 +1,6 @@
 #pragma once
 #include "ast/expression.hpp"
+#include "ast/expression_tree.hpp"
 #include "ast/functions.hpp"
 #include "ast/literal.hpp"
 #include "ast/struct_def.hpp"
@@ -36,6 +37,7 @@ using BuiltinTypeRef = std::reference_wrapper<const Type>;
 inline auto operator<<(std::ostream &out, BuiltinTypeRef in) {
   out << in.get().getTypename();
 };
+
 struct Context {
   std::unordered_map<Token, BuiltinTypeRef> internal_type_map;
   Index root;
@@ -95,6 +97,14 @@ struct Context {
                   VarDeclarationPtr("this", TypeRef(str_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", str_t), root, detail::store, true);
 };
+
+struct Module {
+  Module(Index &&i, ExprTree &&tree)
+      : global_context(std::move(i)), ast(std::move(tree)) {}
+  Index global_context;
+  ExprTree ast;
+};
+
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
   // I really need to create a global object
   BuiltinTypeLit(BuiltinTypeRef val, Context &c) : LiteralImpl(val, c.type_t) {}
@@ -106,9 +116,6 @@ struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {
     return BuiltinTypeLit(c.internal_type_map.at(Token(t)), c);
   }
 
-  ExprPtr clone() const override {
-    return std::make_unique<BuiltinTypeLit>(*this);
-  }
   inline void printval(std::ostream &out) const {
     out << value.get().getTypename();
   }
