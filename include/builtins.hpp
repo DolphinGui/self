@@ -50,7 +50,7 @@ struct Context {
     }
     for (auto op : std::initializer_list<ExprConstRef>{
              i64_assignment, addi, subi, muli, divi, cmpi, struct_assignment,
-             str_assignment}) {
+             str_assignment, bool_assignment}) {
       root.insert({op.get().getName(), op});
     }
   }
@@ -96,6 +96,10 @@ struct Context {
       OperatorDef("=", TypeRef(str_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(str_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", str_t), root, detail::store, true);
+  const OperatorDef bool_assignment =
+      OperatorDef("=", TypeRef(bool_t, RefTypes::ref),
+                  VarDeclarationPtr("this", TypeRef(bool_t, RefTypes::ref)),
+                  VarDeclarationPtr("RHS", bool_t), root, detail::store, true);
 };
 
 struct Module {
@@ -149,7 +153,13 @@ struct StringLit : public LiteralImpl<std::vector<unsigned char>, StringLit> {
 };
 
 struct BoolLit : public LiteralImpl<bool, BoolLit> {
-  BoolLit(bool val, Context &c) : LiteralImpl(val, c.i64_t) {}
+  BoolLit(bool val, Context &c) : LiteralImpl(val, c.bool_t) {}
+  inline void printval(std::ostream &out) const {
+    if (value)
+      out << "true";
+    else
+      out << "false";
+  }
 };
 
 struct StructLit : public LiteralImpl<StructDef, StructLit> {

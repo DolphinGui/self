@@ -34,7 +34,8 @@ struct If : public ExprImpl<If> {
       : block(other.block->clone()), condition(other.condition->clone()) {}
   virtual TokenView getName() const noexcept override { return "return"; }
   inline std::ostream &print(std::ostream &out) const override {
-    out << "if: " << block;
+    out << "if " << *condition;
+    out << ":\n" << *block;
     if (else_block) {
       out << "\nelse: " << *else_block;
     }

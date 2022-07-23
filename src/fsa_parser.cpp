@@ -411,15 +411,14 @@ struct GlobalParser {
     return std::move(base);
   }
   using callback = std::function<void(self::ExprTree &)>;
-  using conditional = std::function<bool(self::TokenView)>;
 
-  constexpr static auto isEndl = [](self::TokenView t) -> bool {
-    return t == self::reserved::endl;
+  constexpr static auto default_end = [](self::TokenView t) -> bool {
+    return t == self::reserved::endl || t == "}";
   };
 
-  self::ExprPtr parseExpr(TokenIt &t, self::Index &context,
-                          callback start = nullptr,
-                          conditional endExpr = isEndl) {
+  self::ExprPtr
+  parseExpr(TokenIt &t, self::Index &context, callback start = nullptr,
+            std::function<bool(self::TokenView)> endExpr = default_end) {
     self::ExprTree tree;
     if (start) {
       start(tree);
@@ -428,6 +427,10 @@ struct GlobalParser {
       if (*t == self::reserved::struct_t) {
         tree.push_back(parseStruct(++t, context));
       } else if (*t == self::reserved::var_t) {
+        auto name = *++t;
+        tree.push_back(parseVar(++t, name, context));
+      } else if (*t == "{") {
+        tree.push_back(std::make_unique<self::Block>(parseBlock(++t, context)));
       } else {
         tree.push_back(std::make_unique<self::UnevaluatedExpression>(*t++));
       }
@@ -478,12 +481,24 @@ struct GlobalParser {
         } else {
           body.push_back(std::make_unique<self::Ret>());
         }
+      } else if (*t == if_t) {
+        ++t;
+        auto if_statement = std::make_unique<self::If>();
+        if_statement->condition =
+            parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
+              return t == ";" || t == "{";
+            });
+        errReport(if_statement->condition->getType().ptr == &c.bool_t,
+                  "if condition expression is supposed to be boolean.");
+        if_statement->block = parseExpr(t, body.contexts);
+        body.push_back(std::move(if_statement));
       } else if (notReserved(*t)) {
         body.push_back(parseExpr(t, body.contexts));
       } else {
         ++t;
       }
     }
+    ++t;
     return body;
   }
 
@@ -523,7 +538,6 @@ struct GlobalParser {
       ++t;
       curr->body.emplace(parseBlock(t, parent));
       curr->body_defined = true;
-      ++t;
     }
     parent.insert({curr->name, *curr});
     return curr;
