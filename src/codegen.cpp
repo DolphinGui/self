@@ -85,15 +85,19 @@ struct Generator {
     if (t == c.i64_t) {
       return llvm::Type::getInt64Ty(context);
     }
+    if (t == c.u64_t) {
+      return llvm::Type::getInt64Ty(context);
+    }
     if (t == c.void_t) {
       return llvm::Type::getVoidTy(context);
     }
-    if (t == c.u64_t) {
-      return llvm::Type::getInt64Ty(context);
+    if (t == c.bool_t) {
+      return llvm::Type::getInt1Ty(context);
     }
     if (t == c.str_t) {
       return str_type;
     }
+
     throw std::runtime_error("non ints not implemented right now");
   }
   llvm::Type *getType(const self::VarDeclaration &var, self::Context &c) {
@@ -203,6 +207,41 @@ struct Generator {
     return llvm::ConstantStruct::get(str_type, {size, global});
   }
 
+  llvm::Value *createIf(const self::If *expr, llvm::IRBuilder<> &builder,
+                        self::Context &c) {
+    auto function = builder.GetInsertBlock()->getParent();
+    auto then_block = llvm::BasicBlock::Create(context, "then", function);
+    auto cont_block = llvm::BasicBlock::Create(context, "continued");
+    llvm::BasicBlock *else_block;
+    if (expr->else_block) {
+      else_block = llvm::BasicBlock::Create(context, "else");
+    } else {
+      else_block = cont_block;
+    }
+    builder.CreateCondBr(dispatch(expr->condition.get(), builder, c),
+                         then_block, else_block);
+    builder.SetInsertPoint(then_block);
+    for (auto &n : *expr->block) {
+      dispatch(n.get(), builder, c);
+    }
+    builder.CreateBr(cont_block);
+    function->getBasicBlockList().push_back(else_block);
+
+    if (else_block != cont_block) {
+      builder.SetInsertPoint(else_block);
+      for (auto &n : *expr->else_block) {
+        dispatch(n.get(), builder, c);
+      }
+      builder.CreateBr(cont_block);
+    }
+
+    if (else_block != cont_block) {
+      function->getBasicBlockList().push_back(cont_block);
+    }
+    builder.SetInsertPoint(cont_block);
+    return nullptr;
+  }
+
   llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
                         self::Context &c) {
     if (auto *fun = dynamic_cast<const self::FunctionCall *>(expr)) {
@@ -235,6 +274,8 @@ struct Generator {
     } else if (type == typeid(self::VarDeref)) {
       auto var = dynamic_cast<const self::VarDeref &>(*expr);
       return var_map.at(self::VarDeclaration::demangle(var.getName()));
+    } else if (type == typeid(self::If)) {
+      return createIf(dynamic_cast<const self::If *>(expr), builder, c);
     } else {
       std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
                 << '\n';

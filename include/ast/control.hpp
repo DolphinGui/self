@@ -1,6 +1,7 @@
 #pragma once
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
+#include <memory>
 namespace self {
 struct Ret : public ExprImpl<Ret> {
   ExprPtr value;
@@ -22,16 +23,17 @@ struct Ret : public ExprImpl<Ret> {
 };
 
 struct If : public ExprImpl<If> {
-  ExprPtr block;
+  std::unique_ptr<Block> block;
   ExprPtr condition;
   // This may be another If for a elif
   // or just another ExpressionTree
-  ExprPtr else_block;
-  If(ExprPtr &&code, ExprPtr &&cond)
+  std::unique_ptr<Block> else_block;
+  If(std::unique_ptr<Block> &&code, ExprPtr &&cond)
       : block(std::move(code)), condition(std::move(cond)) {}
   If() = default;
   If(const If &other)
-      : block(other.block->clone()), condition(other.condition->clone()) {}
+      : block(std::make_unique<Block>(*other.block)),
+        condition(other.condition->clone()) {}
   virtual TokenView getName() const noexcept override { return "return"; }
   inline std::ostream &print(std::ostream &out) const override {
     out << "if " << *condition;

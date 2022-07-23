@@ -490,15 +490,16 @@ struct GlobalParser {
       } else if (*t == if_t) {
         ++t;
         auto if_statement = std::make_unique<self::If>();
-        auto forceBlock = [&](self::ExprPtr e) -> self::ExprPtr {
+        auto forceBlock = [&](self::ExprPtr e) -> std::unique_ptr<self::Block> {
           if (typeid(*t) == typeid(self::Block)) {
-            return e;
+            return std::unique_ptr<self::Block>(
+                reinterpret_cast<self::Block *>(e.release()));
           }
           auto n = std::make_unique<self::Block>(parent);
           n->push_back(std::move(e));
           return n;
         };
-        if_statement->condition = 
+        if_statement->condition =
             parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
               return t == ";" || t == "{";
             });

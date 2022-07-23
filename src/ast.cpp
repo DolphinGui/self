@@ -19,11 +19,7 @@ std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&e, Index &local) {
       // todo implement compiletime function evaluation later
       return {std::move(f), Unresolved};
     case detail::store:
-    case detail::assign: {
-      auto &var = dynamic_cast<VarDeclaration &>(*call->lhs.get());
-      var.value = call->rhs.get();
-      return {std::move(f), Unresolved};
-    }
+    case detail::assign:
     case detail::addi:
     case detail::subi:
     case detail::muli:

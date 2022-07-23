@@ -15,11 +15,14 @@
 // for some reason raw string does not include
 // newline. In a real file the semicolons are
 // not necessary.
-constexpr auto file = "extern \"C\" import \"../stdlib/include/io.h\""
-                      "fun main()->i64{"
-                      "  var a = \"hello world!\\n\";"
-                      "  selfprint(a);"
-                      "  return 0;"
+constexpr auto file = "extern \"C\" import \"../stdlib/include/io.h\"\n"
+                      "fun main()->i64{\n"
+                      "  var b = false\n"
+                      "  var c: i64\n"
+                      "  if b; c = 2;else c = 4;"
+                      "  var a = \"hello world!\\n\"\n"
+                      "  selfprint(a)\n"
+                      "  return 0\n"
                       "}";
 constexpr auto path = "a.o";
 constexpr auto output_name = "a.out";
@@ -47,6 +50,7 @@ int main() {
   llvm::LLVMContext llvm;
   auto stdlib = get_stdlib();
   auto AST = self::lex(std::string(file), c);
+  std::cout << AST.ast;
   auto IR = self::codegen(AST.ast, c, llvm);
   std::error_code file_err;
   IR->print(llvm::outs(), nullptr);
