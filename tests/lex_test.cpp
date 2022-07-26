@@ -33,7 +33,6 @@ constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
 int main() {
   uint count = 0;
   self::Context c;
-  std::cout << std::setw(4);
   for (auto file : {while_inline, do_while, if_else_block, if_else, elif,
                     nesting, boolean, struct_test, import_test, function_def,
                     expr, deref, var_decl, foward_decl}) {

@@ -88,7 +88,6 @@ int main(int argc, char *argv[]) {
         std::exit(1);
       }
       auto llvmIR = self::codegen(module.ast, c, llvm);
-      llvmIR->print(llvm::outs(), nullptr);
       std::string path;
       tmps.push_back(self::createtmp(path));
       self::compile(*llvmIR, *tmps.back());
