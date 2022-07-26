@@ -3,10 +3,12 @@
 #include "lexer.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fmt/core.h>
 #include <iostream>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
 #include <memory>
 #include <sstream>
@@ -33,11 +35,13 @@ constexpr auto output_name = "a.out";
 // I will have to figure out how to
 // query OS details about this later. but for now, this'll do
 constexpr auto link_command =
-    R"(ld.lld -pie --eh-frame-hdr -m elf_x86_64 -dynamic-linker \
- /lib64/ld-linux-x86-64.so.2 /usr/lib64/Scrt1.o /usr/lib64/crti.o \
- /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtbeginS.o -L/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0 \
- -L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} {} -lc /usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o \
- /usr/lib64/crtn.o -o {})";
+    "ld -pie --eh-frame-hdr -dynamic-linker "
+    "/lib64/ld-linux-x86-64.so.2 /usr/lib64/Scrt1.o /usr/lib64/crti.o "
+    "/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtbeginS.o "
+    "-L/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0 "
+    "-L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} {} -lc "
+    "/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o "
+    "/usr/lib64/crtn.o -o {}";
 auto get_stdlib() {
   auto working = std::filesystem::current_path();
   for (auto &f : std::filesystem::directory_iterator(working)) {
@@ -52,7 +56,7 @@ int main() {
   self::Context c;
   llvm::LLVMContext llvm;
   auto stdlib = get_stdlib();
-  auto AST = self::lex(std::string(file), c);
+  auto AST = self::parseFile(std::string(file), c);
   std::cout << AST.ast;
   auto IR = self::codegen(AST.ast, c, llvm);
   std::error_code file_err;

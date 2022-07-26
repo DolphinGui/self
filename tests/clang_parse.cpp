@@ -1,5 +1,4 @@
 #include "fmt/core.h"
-#include <argh.h>
 #include <clang-c/CXString.h>
 #include <clang-c/Index.h>
 #include <cstdio>

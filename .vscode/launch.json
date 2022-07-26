@@ -4,30 +4,38 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
-  {
-    "type": "gdb",
-    "request": "launch",
-    "name": "FFI_test",
-    "target": "./ffi_test",
-    "cwd": "${workspaceRoot}/build",
-    "valuesFormatting": "parseText"
-  },
-  {
-    "type": "gdb",
-    "request": "launch",
-    "name": "clang_parse",
-    "target": "./clang_parse",
-    "cwd": "${workspaceRoot}/build",
-    "valuesFormatting": "parseText"
-  },
-  {
-    "type": "gdb",
-    "request": "launch",
-    "name": "a.out",
-    "target": "./a.out",
-    "cwd": "${workspaceRoot}/build",
-    "valuesFormatting": "parseText"
-  },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "selfc",
+      "program": "${workspaceFolder}/build/selfc",
+      "args": ["test2.me", "libselfstd.a"],
+      "cwd": "${workspaceFolder}/build"
+    },
+    {
+      "type": "gdb",
+      "request": "launch",
+      "name": "FFI_test",
+      "target": "./ffi_test",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "parseText"
+    },
+    {
+      "type": "gdb",
+      "request": "launch",
+      "name": "clang_parse",
+      "target": "./clang_parse",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "parseText"
+    },
+    {
+      "type": "gdb",
+      "request": "launch",
+      "name": "a.out",
+      "target": "./a.out",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "parseText"
+    },
     {
       "name": "lex_test",
       "type": "gdb",
@@ -35,7 +43,8 @@
       "target": "./lex_test",
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "prettyPrinters"
-    },{
+    },
+    {
       "name": "integration_test",
       "type": "gdb",
       "request": "launch",

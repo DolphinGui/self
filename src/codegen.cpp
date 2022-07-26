@@ -323,6 +323,7 @@ struct Generator {
 } // namespace
 
 namespace self {
+// must be returned by unique_ptr because module cannot be moved or copied
 std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
                                       llvm::LLVMContext &llvm) {
   auto module =

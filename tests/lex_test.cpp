@@ -38,7 +38,7 @@ int main() {
                            nesting, boolean, struct_test, import_test,
                            function_def, expr, deref, var_decl, foward_decl}) {
     fmt::print("Test {}:\n", count++);
-    auto results = self::lex(std::string(file), c);
+    auto results = self::parseFile(std::string(file), c);
     for (auto &ex : results.ast) {
       std::cout << *ex << '\n';
     }

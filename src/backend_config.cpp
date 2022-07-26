@@ -19,6 +19,7 @@
 #include <llvm/Transforms/Scalar/GVN.h>
 
 #include <stdexcept>
+#include <system_error>
 
 namespace {
 void init() {
@@ -50,14 +51,14 @@ llvm::TargetMachine *config_module(llvm::Module &module) {
 }
 
 void use_passes(llvm::Module &module, llvm::TargetMachine *target,
-                llvm::raw_fd_ostream &dest) {
+                llvm::raw_pwrite_stream &dest) {
   llvm::legacy::PassManager pass;
 
   if (target->addPassesToEmitFile(pass, dest, nullptr, llvm::CGFT_ObjectFile)) {
     llvm::errs() << "TargetMachine can't emit a file of this type\n";
     throw std::runtime_error("");
   }
-  
+
   pass.add(llvm::createInstructionCombiningPass());
   pass.add(llvm::createReassociatePass());
   pass.add(llvm::createGVNPass());
@@ -67,7 +68,7 @@ void use_passes(llvm::Module &module, llvm::TargetMachine *target,
 }
 } // namespace
 namespace self {
-void compile(llvm::Module &module, llvm::raw_fd_ostream &file) {
+void compile(llvm::Module &module, llvm::raw_pwrite_stream &file) {
   auto target = config_module(module);
   use_passes(module, target, file);
 }

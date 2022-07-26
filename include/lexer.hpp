@@ -8,5 +8,5 @@ namespace detail {
 std::string preprocess(std::string contents);
 TokenVec parseToken(std::string whole);
 } // namespace detail
-Module lex(std::string in, Context &c);
+Module parseFile(std::string in, Context &c);
 } // namespace self

@@ -10,22 +10,22 @@ include(FetchContent)
 
 FetchContent_Declare(json
 URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.tar.xz)
-FetchContent_Declare(argh
-GIT_REPOSITORY https://github.com/adishavit/argh.git
-GIT_TAG 39b9a00046143f6b300dcf98ea989486cf62097d)
+FetchContent_Declare(argparse
+GIT_REPOSITORY https://github.com/p-ranav/argparse.git
+GIT_TAG 878bd5edac1a2483e8fcdbb3c7db6e4b5ebc54eb)
 FetchContent_Declare(re2
 GIT_REPOSITORY https://github.com/google/re2.git
 GIT_TAG ba2e7c2f25047a6848f2baa9bc4cb700ea9dda84)
 FetchContent_Declare(fmt
 GIT_REPOSITORY https://github.com/fmtlib/fmt.git
 GIT_TAG c48be439f1ae03f2726e30ac93fce3a667dc4be2)
-FetchContent_MakeAvailable(json argh re2 fmt)
+FetchContent_MakeAvailable(json argparse re2 fmt)
 
 if(NOT TARGET re2::re2)
   message(FATAL_ERROR "re2 has failed to build")
 endif()
-if(NOT TARGET argh)
-  message(FATAL_ERROR "argh has failed to build")
+if(NOT TARGET argparse::argparse)
+  message(FATAL_ERROR "argparse has failed to build")
 endif()
 if(NOT TARGET fmt::fmt)
   message(FATAL_ERROR "fmt has failed to build")
@@ -74,7 +74,12 @@ endif()
 add_executable(selfc ${COMPILER_SRC}/selfc.cpp)
 target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)
 set_property(TARGET selfc PROPERTY CXX_STANDARD 20)
-target_link_libraries(selfc selfparse argh)
+target_link_libraries(selfc selfparse selfgen argparse::argparse fmt::fmt)
+if(WIN32)
+  target_compile_definitions(selfc SELF_WINDOWS)
+else()
+  target_compile_definitions(selfc PRIVATE SELF_UNIX)
+endif()
 
 add_executable(lex_test ${CMAKE_SOURCE_DIR}/tests/lex_test.cpp)
 set_property(TARGET lex_test PROPERTY CXX_STANDARD 20)
@@ -98,7 +103,7 @@ target_link_libraries(cstd_test selfstd)
 add_executable(clang_parse ${CMAKE_SOURCE_DIR}/tests/clang_parse.cpp)
 set_property(TARGET clang_parse PROPERTY CXX_STANDARD 20)
 # this is not portable but I'll figure something else out later
-target_link_libraries(clang_parse fmt::fmt argh clang)
+target_link_libraries(clang_parse fmt::fmt argparse::argparse clang)
 
 add_executable(ffi_test ${CMAKE_SOURCE_DIR}/tests/ffi_test.cpp)
 set_property(TARGET ffi_test PROPERTY CXX_STANDARD 20)

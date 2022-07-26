@@ -1,8 +1,5 @@
 * control flow
-  * if/else
   * switch?
-  * while
-  * maybe some sort of for loop?
 * metaprogramming
   * type as data
   * concepts
@@ -10,7 +7,8 @@
 * compiletime constructs
   * compiletime versions of control flow
 * FFI
-  * import a c/c++ lexer
+  * Maybe consider c++?
+  * expand c types
 * Type features
   * pointers and references
   * const?
