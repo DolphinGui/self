@@ -56,7 +56,8 @@ int main() {
   self::Context c;
   llvm::LLVMContext llvm;
   auto stdlib = get_stdlib();
-  auto AST = self::parseFile(std::string(file), c);
+  auto f = std::string(file);
+  auto AST = self::parseFile(f, c);
   std::cout << AST.ast;
   auto IR = self::codegen(AST.ast, c, llvm);
   std::error_code file_err;

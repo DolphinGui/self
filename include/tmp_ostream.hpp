@@ -9,6 +9,12 @@
 
 namespace self {
 
+// technically creates a race condition
+// where two programs might acquire the
+// same tmpnam at the same time.
+// To replace this with a proper tmpfile
+// I'd have to figure out how to pass
+// temporary files to ld.
 inline auto createtmp(std::string &out) {
   out = std::tmpnam(nullptr);
   std::error_code err;

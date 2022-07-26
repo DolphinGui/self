@@ -5,5 +5,5 @@
 #include "lexer.hpp"
 
 namespace self {
-Module parse(TokenVec in, Context &c);
+Module parse(LexedFileRef& in, Context &c);
 }

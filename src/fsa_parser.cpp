@@ -30,6 +30,7 @@
 #include "ast/unevaluated_expression.hpp"
 #include "ast/variables.hpp"
 #include "builtins.hpp"
+#include "error_handling.hpp"
 #include "ffi_parse.hpp"
 #include "lexer.hpp"
 #include "literals.hpp"
@@ -98,26 +99,79 @@ constexpr auto notReserved = [](auto t) {
   return !self::reserved::isKeyword(t) && !self::reserved::isGrammar(t);
 };
 
-template <typename T> struct TokenItBase {
-  T &where;
+struct TokenIt {
+  TokenIt(self::LexedFileRef &where) : where(where) {}
+  self::LexedFileRef &where;
   size_t pos = 0;
-  self::TokenView operator*() { return where.at(pos); }
-  TokenItBase &operator++() {
-    if (pos >= where.size()) {
+  self::TokenView operator*() { return where.tokens.at(pos); }
+  TokenIt &operator++() {
+    if (pos >= where.tokens.size()) {
       throw std::runtime_error("out of bounds");
     }
     ++pos;
     return *this;
   }
-  TokenItBase operator++(int) {
-    TokenItBase tmp = *this;
+  TokenIt &operator--() {
+    if (pos >= where.tokens.size()) {
+      throw std::runtime_error("out of bounds");
+    }
+    ++pos;
+    return *this;
+  }
+  TokenIt operator++(int) {
+    TokenIt tmp = *this;
     this->operator++();
     return tmp;
   }
-  TokenItBase next() const noexcept { return TokenItBase{where, pos + 1}; }
-  bool end() const noexcept { return pos == where.size(); }
+  TokenIt next() const noexcept { return TokenIt{where, pos + 1}; }
+  TokenIt prev() const noexcept { return TokenIt{where, pos - 1}; }
+  bool end() const noexcept { return pos == where.tokens.size(); }
+  size_t nextLineLength() const {
+    TokenIt tmp = *this;
+    size_t length = 0;
+    while (*tmp != self::reserved::endl) {
+      ++tmp;
+      ++length;
+    }
+    return length;
+  }
+  size_t prevLineLength() const {
+    TokenIt tmp = *this;
+    size_t length = 0;
+    while (*tmp != self::reserved::endl) {
+      --tmp;
+      ++length;
+    }
+    return length;
+  }
+  auto getCol() const {
+    // bubble search may be naive
+    // but probably works better for
+    // small sized n's
+    unsigned prev = 0;
+    for (auto length : where.line_pos) {
+      if (length > pos) {
+        return pos - prev;
+      }
+      prev = length;
+    }
+    throw std::logic_error("Failed to get line column");
+  }
+
+  auto getRow() const {
+    size_t count = 0;
+    for (auto length : where.line_pos) {
+      if (length > pos) {
+        return count;
+      }
+      ++count;
+    }
+    throw std::logic_error("Failed to get line column");
+  }
+
+private:
+  TokenIt(self::LexedFileRef &where, size_t pos) : where(where), pos(pos) {}
 };
-using TokenIt = TokenItBase<std::vector<self::Token>>;
 
 struct GlobalParser {
   static inline std::string err_string;
@@ -125,6 +179,7 @@ struct GlobalParser {
   // for large type lists.
   using TypeList = std::unordered_map<self::TokenView, self::TypeRef>;
   self::Context &c;
+  self::ErrorList &err;
   // todo: add proper compile error reporting later.
   auto errReport(bool condition, std::string_view message) {
     if (!condition) {
@@ -647,11 +702,6 @@ struct GlobalParser {
     return result.str();
   }
 
-  auto tokenize(const auto &path) {
-    auto f = fileOpen(path);
-    return self::detail::parseToken(self::detail::preprocess(f));
-  }
-
   auto parseStrLit(TokenIt &t, std::string_view err) {
     auto [a, b] = isStr(*t);
     errReport(a, err);
@@ -666,8 +716,9 @@ struct GlobalParser {
                      self::Index &global) {
     auto path = parseStrLit(t, "Import path must be a string literal");
     ++t;
-    auto f = tokenize(path);
-    process(TokenIt{f}, syntax_tree, global);
+    auto file = fileOpen(path);
+    auto tokens = self::detail::parseToken(self::detail::preprocess(file));
+    process(TokenIt{tokens}, syntax_tree, global);
   }
 
   auto processExtern(TokenIt &t, self::ExprTree &syntax_tree,
@@ -687,23 +738,31 @@ struct GlobalParser {
 
   void process(TokenIt t, self::ExprTree &syntax_tree, self::Index &global) {
     using namespace self::reserved;
-    while (!t.end()) {
-      if (*t == var_t) {
-        auto name = *++t;
-        syntax_tree.push_back(parseVar(++t, name, global));
-      } else if (*t == fun_t) {
-        auto name = *++t;
-        errReport(notReserved(name), "function name is reserved");
-        syntax_tree.push_back(parseFun(++t, name, global));
-      } else if (notReserved(*t)) {
-        syntax_tree.push_back(parseExpr(t, global));
-      } else if (*t == import_t) {
-        processImport(++t, syntax_tree, global);
-      } else if (*t == "extern") {
-        processExtern(++t, syntax_tree, global);
-      } else {
-        errReport(*t++ == endl, "invalid expression");
+  retry:
+    try {
+      while (!t.end()) {
+        if (*t == var_t) {
+          auto name = *++t;
+          syntax_tree.push_back(parseVar(++t, name, global));
+        } else if (*t == fun_t) {
+          auto name = *++t;
+          errReport(notReserved(name), "function name is reserved");
+          syntax_tree.push_back(parseFun(++t, name, global));
+        } else if (notReserved(*t)) {
+          syntax_tree.push_back(parseExpr(t, global));
+        } else if (*t == import_t) {
+          processImport(++t, syntax_tree, global);
+        } else if (*t == "extern") {
+          processExtern(++t, syntax_tree, global);
+        } else {
+          errReport(*t++ == endl, "invalid expression");
+        }
       }
+    } catch (std::runtime_error e) {
+      err.errors.push_back(self::Error{t.getCol(), t.getRow(), e.what()});
+      while (*t != ";")
+        ++t;
+      goto retry;
     }
   }
 
@@ -713,15 +772,16 @@ struct GlobalParser {
     return syntax_tree;
   }
 
-  GlobalParser(self::Context &c) : c(c) {}
+  GlobalParser(self::Context &c, self::ErrorList &e) : c(c), err(e) {}
 };
 } // namespace
 
 namespace self {
-Module parse(TokenVec in, Context &c) {
-  auto parser = GlobalParser(c);
+Module parse(LexedFileRef &in, Context &c) {
+  ErrorList e;
+  auto parser = GlobalParser(c, e);
   auto root = Index(c.root);
   auto ast = parser.process(TokenIt{in}, root);
-  return Module(std::move(root), std::move(ast));
+  return Module(std::move(root), std::move(ast), std::move(e));
 }
 } // namespace self

@@ -109,3 +109,7 @@ add_executable(ffi_test ${CMAKE_SOURCE_DIR}/tests/ffi_test.cpp)
 set_property(TARGET ffi_test PROPERTY CXX_STANDARD 20)
 target_link_libraries(ffi_test PRIVATE fmt::fmt selfffi)
 target_compile_definitions(ffi_test PRIVATE PROJECT_SOURCE=${CMAKE_SOURCE_DIR})
+
+add_executable(error_test ${CMAKE_SOURCE_DIR}/tests/error_test.cpp)
+set_property(TARGET error_test PROPERTY CXX_STANDARD 20)
+target_link_libraries(error_test PRIVATE fmt::fmt selfparse)

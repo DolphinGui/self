@@ -5,6 +5,7 @@
 #include "ast/literal.hpp"
 #include "ast/struct_def.hpp"
 #include "ast/variables.hpp"
+#include "error_handling.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -106,10 +107,12 @@ struct Context {
 };
 
 struct Module {
-  Module(Index &&i, ExprTree &&tree)
-      : global_context(std::move(i)), ast(std::move(tree)) {}
+  Module(Index &&i, ExprTree &&tree, ErrorList &&errs)
+      : global_context(std::move(i)), ast(std::move(tree)),
+        errs(std::move(errs)) {}
   Index global_context;
   ExprTree ast;
+  ErrorList errs;
 };
 
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {

@@ -6,6 +6,8 @@
 #include <ranges>
 #include <re2/re2.h>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -14,9 +16,11 @@
 #include "lexer.hpp"
 #include "literals.hpp"
 
+namespace {} // namespace
+
 namespace self {
 namespace detail {
-std::string preprocess(std::string contents) {
+std::string &preprocess(std::string &contents) {
   RE2::GlobalReplace(&contents, R"(\/\/.*?\n)", " ");
   RE2::GlobalReplace(&contents, R"(\/\*[\S\s]*?\*\/)", " ");
   RE2::GlobalReplace(&contents, "\n", ";");
@@ -24,19 +28,28 @@ std::string preprocess(std::string contents) {
   return contents;
 }
 
-self::TokenVec parseToken(std::string whole) {
-  re2::StringPiece input(whole);
-  Token cur_Token;
-  TokenVec Token_list;
+self::LexedFileRef parseToken(std::string &whole) {
+  auto input = re2::StringPiece(whole);
+  re2::StringPiece cur_token;
+  TokenVec token_list;
+  std::vector<unsigned> line_pos;
+  line_pos.push_back(0);
   while (RE2::FindAndConsume(
       &input, R"(((?:->|'.+?'|".+?")|[(){}[\];,<>:]|[^<>\s(){};,[\]'":]+))",
-      &cur_Token)) {
-    Token_list.push_back(cur_Token);
+      &cur_token)) {
+    token_list.push_back(std::string_view(cur_token.data(), cur_token.size()));
+    if (std::string_view(cur_token) == self::reserved::endl) {
+      auto pos = std::distance(static_cast<const char *>(whole.data()),
+                               cur_token.data());
+      line_pos.push_back(pos);
+    }
   }
-  return Token_list;
+  line_pos.erase(line_pos.begin());
+  return {std::move(token_list), whole, std::move(line_pos)};
 }
 } // namespace detail
-Module parseFile(std::string in, Context &c) {
-  return parse(detail::parseToken(detail::preprocess(in)), c);
+Module parseFile(std::string &in, Context &c) {
+  auto n = detail::parseToken(detail::preprocess(in));
+  return parse(n, c);
 }
 } // namespace self

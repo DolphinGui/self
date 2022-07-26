@@ -10,6 +10,10 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef SELF_FMT_FORMATTABLE
+#include <fmt/ostream.h>
+#endif
+
 namespace self {
 using Token = std::string;
 using TokenView = std::string_view;
@@ -73,6 +77,12 @@ struct ExprBase {
   virtual bool isCompiletime() const noexcept { return false; }
   virtual ExprPtr clone() const = 0;
 };
+
+#ifdef SELF_FMT_FORMATTABLE
+}
+template <> struct fmt::formatter<self::ExprBase> : fmt::ostream_formatter {};
+namespace self{
+#endif
 
 template <typename Derive> struct ExprImpl : public ExprBase {
   ExprPtr clone() const override {

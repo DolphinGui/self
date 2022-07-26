@@ -1,3 +1,4 @@
+#define SELF_FMT_FORMATTABLE
 #include "argparse/argparse.hpp"
 #include "backend_config.hpp"
 #include "builtins.hpp"
@@ -80,8 +81,12 @@ int main(int argc, char *argv[]) {
   auto paths = args.get<std::vector<std::string>>("input");
   for (auto &p : paths) {
     if (p.ends_with(".me")) {
-      auto file = extract(args.get("input"));
+      auto file = extract(p);
       auto module = self::parseFile(file, c);
+      if (!module.errs.errors.empty()) {
+        fmt::print("Errors exist in file {}: {}", p, module.errs);
+        std::exit(1);
+      }
       auto llvmIR = self::codegen(module.ast, c, llvm);
       llvmIR->print(llvm::outs(), nullptr);
       std::string path;
