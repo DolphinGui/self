@@ -663,12 +663,11 @@ struct GlobalParser {
       ++t;
       if (*t == ")") {
         ++t;
-        return std::make_unique<self::OpaqueLit>(self::OpaqueStruct(id, 0), c);
+        return std::make_unique<self::StructDef>(0, parent);
       } else {
         auto [success, size] = isInt(*t++);
         errReport(success, "Expected integer or \")\"");
-        return std::make_unique<self::OpaqueLit>(self::OpaqueStruct(id, size),
-                                                 c);
+        return std::make_unique<self::StructDef>(size, parent);
       }
     } else {
       auto result = self::StructDef(parent);

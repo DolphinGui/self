@@ -14,13 +14,16 @@ struct StructDef : public ExprImpl<StructDef>, Type {
   std::string identity;
   Index context;
   ExprTree body;
+  size_t opaque_size;
+  bool is_opaque;
 
   StructDef(Index &parent) : context(parent) {}
-  StructDef(StructDef &&other)
-      : identity(std::move(other.identity)), context(std::move(other.context)),
-        body(std::move(other.body)){};
+  StructDef(size_t size, Index &parent)
+      : context(parent), opaque_size(size), is_opaque(true) {}
+  StructDef(StructDef &&other) = default;
   StructDef(const StructDef &other)
-      : identity(other.identity), context(other.context) {
+      : identity(other.identity), context(other.context),
+        opaque_size(other.opaque_size), is_opaque(other.is_opaque) {
     std::for_each(other.body.cbegin(), other.body.cend(),
                   [&](const ExprPtr &e) { body.push_back(e->clone()); });
   }
@@ -33,23 +36,5 @@ struct StructDef : public ExprImpl<StructDef>, Type {
   }
   TokenView getName() const noexcept override { return "struct decl"; }
   TokenView getTypename() const noexcept override { return identity; }
-};
-struct OpaqueStruct : public ExprBase, Type {
-  OpaqueStruct(unsigned int identity, size_t size = 0)
-      : size(size),
-        identity(std::string("struct").append(std::to_string(identity))) {}
-  size_t size = 0;
-  std::string identity;
-  std::ostream &print(std::ostream &out) const override {
-    out << "opaque struct" << size;
-    if (size)
-      out << " size " << size;
-    return out;
-  }
-  TokenView getName() const noexcept override { return "opaque struct"; }
-  TokenView getTypename() const noexcept override { return identity; }
-  ExprPtr clone() const override {
-    return std::make_unique<OpaqueStruct>(*this);
-  }
 };
 } // namespace self

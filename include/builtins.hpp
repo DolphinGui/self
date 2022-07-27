@@ -173,19 +173,12 @@ struct StructLit : public LiteralImpl<StructDef, StructLit> {
       : LiteralImpl(std::move(val), c.type_t) {}
   inline void printval(std::ostream &out) const { out << value; }
 };
-struct OpaqueLit : public LiteralImpl<OpaqueStruct, OpaqueLit> {
-  OpaqueLit(OpaqueStruct &&val, Context &c)
-      : LiteralImpl(std::move(val), c.type_t) {}
-};
-
 // using StringLit = LiteralImpl<std::vector<unsigned char>>;
 inline TypeRef getLiteralType(const ExprBase &e) {
   if (auto *builtin = dynamic_cast<const BuiltinTypeLit *>(&e)) {
     return builtin->value.get();
   } else if (auto *structural = dynamic_cast<const StructLit *>(&e)) {
     return structural->value;
-  } else if (auto *opaque = dynamic_cast<const OpaqueLit *>(&e)) {
-    return opaque->value;
   } else
     throw std::runtime_error("That's not a type expression");
 }
