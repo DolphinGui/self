@@ -261,18 +261,22 @@ struct GlobalParser {
                    dynamic_cast<const self::UnevaluatedExpression *>(e)) {
       return coerce;
     }
-    if (e->getType() == type)
-      return match;
-    else
-      return mismatch;
+    auto etype = e->getType();
+    if (etype.ptr == type.ptr) {
+      if (etype.depth == type.depth)
+        return match;
+      else if (etype.depth - 1 == type.depth)
+        return coerce;
+    }
+    return mismatch;
   }
 
   static bool coerceType(self::ExprBase *e, self::TypePtr type) {
     if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
       if (!var->type_ref.ptr) {
         var->type_ref = type;
-        // figure out how to not hardcode this later.
-        var->type_ref.is_ref = self::RefTypes::value;
+        if (var->type_ref.depth == 0)
+          var->type_ref.is_ref = self::RefTypes::value;
         return true;
       }
     } else if (auto *uneval = dynamic_cast<self::UnevaluatedExpression *>(e)) {
@@ -389,7 +393,7 @@ struct GlobalParser {
     auto binCondition = [&](auto *op, auto lhs, auto rhs, auto &no_coerce,
                             auto &coerce_r) {
       using enum coerce_result;
-      auto left = needCoerce(lhs->get(), op->rhs->getDecltype());
+      auto left = needCoerce(lhs->get(), op->lhs->getDecltype());
       auto right = needCoerce(rhs->get(), op->rhs->getDecltype());
       if (left == match && right == match) {
         no_coerce.push_back(op);

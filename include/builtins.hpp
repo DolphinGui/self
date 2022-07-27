@@ -51,7 +51,8 @@ struct Context {
     }
     for (auto op : std::initializer_list<ExprRef>{
              i64_assignment, addi, subi, muli, divi, eqi, neqi,
-             struct_assignment, str_assignment, bool_assignment}) {
+             struct_assignment, str_assignment, bool_assignment, ref_cast,
+             ref_assignment}) {
       root.insert({op.get().getName(), op});
     }
   }
@@ -64,6 +65,7 @@ struct Context {
   }
   Context(const Context &) = delete;
   const TypeType type_t = TypeType("type");
+  const TypeType deduced_t = TypeType("deduced");
   const TypeType i64_t = TypeType("i64");
   const TypeType u64_t = TypeType("u64");
   const TypeType f64_t = TypeType("f64");
@@ -104,6 +106,14 @@ struct Context {
       OperatorDef("=", TypeRef(bool_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(bool_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", bool_t), root, detail::store, true);
+  FunctionDef ref_cast = FunctionDef(
+      "ref", root, TypeRef(deduced_t, RefTypes::ref, 2), false,
+      VarDeclarationPtr("arg", TypeRef(deduced_t, RefTypes::ref, 2)));
+  OperatorDef ref_assignment = OperatorDef(
+      "=", TypeRef(deduced_t, RefTypes::ref),
+      VarDeclarationPtr("this", TypeRef(deduced_t, RefTypes::ref)),
+      VarDeclarationPtr("RHS", TypeRef(deduced_t, RefTypes::ref, 2)), root,
+      detail::store, true);
 };
 
 struct Module {

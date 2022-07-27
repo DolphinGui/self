@@ -8,6 +8,7 @@
 #include "builtins.hpp"
 #include "lexer.hpp"
 
+constexpr auto reference = "var a = 21; var b = ref(a)";
 constexpr auto while_inline =
     "fun b()->i64; fun function(){var a = false; while a; b();}";
 constexpr auto do_while =
@@ -33,19 +34,20 @@ constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
 int main() {
   uint count = 0;
   self::Context c;
-  for (auto file : {while_inline, do_while, if_else_block, if_else, elif,
-                    nesting, boolean, struct_test, import_test, function_def,
-                    expr, deref, var_decl, foward_decl}) {
+  for (auto file : {reference, while_inline, do_while, if_else_block, if_else,
+                    elif, nesting, boolean, struct_test, import_test,
+                    function_def, expr, deref, var_decl, foward_decl}) {
     fmt::print("Test {}:\n", count++);
     auto f = std::string(file);
     auto results = self::parseFile(f, c);
     for (auto &ex : results.ast) {
-      fmt::print("{}\n", *ex);
+      fmt::print("{}", *ex);
     }
     if (results.ast.isComplete()) {
       fmt::print("type is complete\n");
     } else {
       fmt::print("type is not complete\n");
     }
+    fmt::print("{}", results.errs);
   }
 }

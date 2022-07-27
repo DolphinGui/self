@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -23,36 +24,55 @@ struct Type {
     return lhs.getTypename() == rhs.getTypename();
   }
 };
-enum struct RefTypes { value, ref, ptr, any };
+enum struct RefTypes { value, ref };
 struct TypeRef {
   const Type &ptr;
   // These are qualifiers.
-  RefTypes is_ref = RefTypes::any;
+  RefTypes is_ref = RefTypes::value;
+  uint8_t depth = 0;
+  bool is_mutable = false;
   TypeRef(const Type &ptr) : ptr{ptr} {}
-  TypeRef(const Type &ptr, RefTypes ref) : ptr{ptr}, is_ref(ref) {}
+  TypeRef(const Type &ptr, RefTypes ref) : ptr{ptr}, is_ref(ref) {
+    if (ref == RefTypes::ref)
+      depth = 1;
+  }
+  TypeRef(const Type &ptr, RefTypes ref, uint8_t depth, bool is_mutable = false)
+      : ptr{ptr}, is_ref(ref), depth(depth), is_mutable(is_mutable) {}
   friend bool operator==(TypeRef left, TypeRef right) {
     using enum RefTypes;
-    if (left.is_ref == any || right.is_ref == any) {
-      return left.ptr == right.ptr;
-    }
     return left.ptr == right.ptr && left.is_ref == right.is_ref;
+  }
+  std::string dump()const{
+    std::string result;
+    result.append(ptr.getTypename());
+    auto i = depth;
+    while(i--){
+      result.push_back('*');
+    }
+    return result;
   }
 };
 
 struct TypePtr {
   const Type *ptr;
   // These are qualifiers.
-  RefTypes is_ref = RefTypes::any;
+  RefTypes is_ref = RefTypes::value;
+  uint8_t depth = 0;
+  bool is_mutable = false;
   TypePtr(const Type *ptr) : ptr{ptr} {}
-  TypePtr(const Type *ptr, RefTypes ref) : ptr{ptr}, is_ref(ref) {}
-  TypePtr(TypeRef t) : ptr{&t.ptr}, is_ref(t.is_ref) {}
+  TypePtr(const Type *ptr, RefTypes ref) : ptr{ptr}, is_ref(ref) {
+    if (ref == RefTypes::ref)
+      depth = 1;
+  }
+  TypePtr(const Type *ptr, RefTypes ref, uint8_t depth, bool is_mutable = false)
+      : ptr{ptr}, is_ref(ref), depth(depth), is_mutable(is_mutable) {}
+  TypePtr(TypeRef t)
+      : ptr{&t.ptr}, is_ref(t.is_ref), depth(t.depth),
+        is_mutable(t.is_mutable) {}
   friend bool operator==(TypePtr left, TypePtr right) {
     using enum RefTypes;
     if (!left.ptr || !right.ptr)
       return false;
-    if (left.is_ref == any || right.is_ref == any) {
-      return left.ptr == right.ptr;
-    }
     return left.ptr == right.ptr && left.is_ref == right.is_ref;
   }
   operator TypeRef() const {
@@ -60,6 +80,15 @@ struct TypePtr {
       throw std::runtime_error("TypePtr is null");
     }
     return {*ptr, is_ref};
+  }
+  std::string dump()const{
+    std::string result;
+    result.append(ptr->getTypename());
+    auto i = depth;
+    while(i--){
+      result.push_back('*');
+    }
+    return result;
   }
 };
 
@@ -81,7 +110,7 @@ struct ExprBase {
 #ifdef SELF_FMT_FORMATTABLE
 }
 template <> struct fmt::formatter<self::ExprBase> : fmt::ostream_formatter {};
-namespace self{
+namespace self {
 #endif
 
 template <typename Derive> struct ExprImpl : public ExprBase {

@@ -195,6 +195,12 @@ public:
   bool isBinary() const noexcept { return lhs && rhs; }
   bool isUnary() const noexcept { return !isBinary(); }
   virtual TypePtr getType() const noexcept override {
+    // yes this is hardcoded no I can't be bothered
+    // to pass a global object to this
+    if (definition.return_type.ptr->getTypename() == "deduced") {
+      // super hardcoded for ref_assignment rn
+      return rhs->getType();
+    }
     return definition.return_type;
   }
 };
