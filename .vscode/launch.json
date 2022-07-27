@@ -13,44 +13,47 @@
       "cwd": "${workspaceFolder}/build"
     },
     {
-      "type": "gdb",
+      "type": "lldb",
       "request": "launch",
-      "name": "FFI_test",
-      "target": "./ffi_test",
-      "cwd": "${workspaceRoot}/build",
-      "valuesFormatting": "parseText"
+      "name": "ffi_test",
+      "program": "${workspaceFolder}/build/ffi_test",
+      "cwd": "${workspaceFolder}/build"
     },
     {
-      "type": "gdb",
+      "type": "lldb",
       "request": "launch",
       "name": "clang_parse",
-      "target": "./clang_parse",
-      "cwd": "${workspaceRoot}/build",
-      "valuesFormatting": "parseText"
+      "program": "${workspaceFolder}/build/clang_parse",
+      "cwd": "${workspaceFolder}/build"
     },
     {
-      "type": "gdb",
+      "type": "lldb",
       "request": "launch",
       "name": "a.out",
-      "target": "./a.out",
+      "program": "${workspaceFolder}/build/a.out",
+      "cwd": "${workspaceFolder}/build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "lex_test",
+      "program": "${workspaceFolder}/build/lex_test",
+      "cwd": "${workspaceFolder}/build"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "integration_test",
+      "program": "${workspaceFolder}/build/integration_test",
+      "cwd": "${workspaceFolder}/build"
+    }, {
+      "type": "gdb",
+      "request": "launch",
+      "name": "integration_test-gdb",
+      "target": "${workspaceFolder}/build/integration_test",
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "parseText"
     },
-    {
-      "name": "lex_test",
-      "type": "gdb",
-      "request": "launch",
-      "target": "./lex_test",
-      "cwd": "${workspaceRoot}/build",
-      "valuesFormatting": "prettyPrinters"
-    },
-    {
-      "name": "integration_test",
-      "type": "gdb",
-      "request": "launch",
-      "target": "./integration_test",
-      "cwd": "${workspaceRoot}/build",
-      "valuesFormatting": "prettyPrinters"
-    }
+    
   ]
 }

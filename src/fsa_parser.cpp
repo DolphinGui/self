@@ -254,8 +254,10 @@ struct GlobalParser {
   coerce_result needCoerce(const self::ExprBase *e, self::TypePtr type) {
     using enum coerce_result;
     if (const auto *var = dynamic_cast<const self::VarDeclaration *>(e)) {
-      if (!var->type_ref.ptr) {
+      if (!var->getDecltype().ptr) {
         return coerce;
+      } else if (var->getDecltype() == type) {
+        return match;
       }
     } else if (const auto *uneval =
                    dynamic_cast<const self::UnevaluatedExpression *>(e)) {
@@ -275,6 +277,9 @@ struct GlobalParser {
     if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
       if (!var->type_ref.ptr) {
         var->type_ref = type;
+        if (type.depth == 0)
+          throw std::runtime_error("var coercion depth should not be 0");
+        --var->type_ref.depth;
         if (var->type_ref.depth == 0)
           var->type_ref.is_ref = self::RefTypes::value;
         return true;
@@ -724,8 +729,7 @@ struct GlobalParser {
     process(TokenIt{tokens}, syntax_tree, global);
   }
 
-  auto processExtern(TokenIt &t, self::ExprTree &syntax_tree,
-                     self::Index &context) {
+  auto processExtern(TokenIt &t, self::ExprTree &syntax_tree) {
     auto spec = parseStrLit(t, "extern specification must be a string literal");
     if (spec == "C") {
       ++t;
@@ -733,7 +737,7 @@ struct GlobalParser {
                 "expected import after extern specification");
       auto path = parseStrLit(t, "Import path must be a string literal");
       ++t;
-      self::parseFFI(syntax_tree, context, c, path, "-O2");
+      self::parseFFI(syntax_tree, c.root, c, path, "-O2");
     } else {
       errReport(false, "unknown extern specification");
     }
@@ -756,7 +760,7 @@ struct GlobalParser {
         } else if (*t == import_t) {
           processImport(++t, syntax_tree, global);
         } else if (*t == "extern") {
-          processExtern(++t, syntax_tree, global);
+          processExtern(++t, syntax_tree);
         } else {
           errReport(*t++ == endl, "invalid expression");
         }

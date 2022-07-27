@@ -30,6 +30,7 @@ public:
   TypePtr getType() const noexcept override {
     auto result = type_ref;
     result.is_ref = RefTypes::ref;
+    ++result.depth;
     return result;
   }
 
@@ -60,9 +61,7 @@ struct VarDeref : public ExprImpl<VarDeref> {
   inline std::string_view getName() const noexcept override { return name; }
 
   virtual TypePtr getType() const noexcept override {
-    auto type = definition.getDecltype();
-    type.is_ref = RefTypes::ref;
-    return type;
+    return definition.getType();
   }
 };
 } // namespace self
