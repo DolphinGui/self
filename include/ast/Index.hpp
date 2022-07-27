@@ -33,15 +33,15 @@ public:
       return parent->isUnique(t);
     return false;
   }
-  std::optional<ExprConstRef> find(TokenView t) {
+  std::optional<ExprRef> find(TokenView t) {
     auto r = equal_range(t);
     if (std::distance(r.first, r.second) != 1)
       return std::nullopt;
 
     return {r.first->second};
   }
-  void insert(std::pair<TokenView, ExprConstRef> &&pair) {
-    curr.insert(std::forward<std::pair<TokenView, ExprConstRef>>(pair));
+  void insert(std::pair<TokenView, ExprRef> &&pair) {
+    curr.insert(std::forward<std::pair<TokenView, ExprRef>>(pair));
   }
   bool contains(TokenView t) const {
     if (curr.contains(t)) {

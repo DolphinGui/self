@@ -49,7 +49,7 @@ struct Context {
       internal_type_map.insert(
           {Token(type.get().getTypename()), std::cref(type)});
     }
-    for (auto op : std::initializer_list<ExprConstRef>{
+    for (auto op : std::initializer_list<ExprRef>{
              i64_assignment, addi, subi, muli, divi, eqi, neqi,
              struct_assignment, str_assignment, bool_assignment}) {
       root.insert({op.get().getName(), op});
@@ -71,36 +71,36 @@ struct Context {
   const TypeType str_t = TypeType("str");
   const TypeType bool_t = TypeType("bool");
 
-  const OperatorDef i64_assignment = OperatorDef(
+  OperatorDef i64_assignment = OperatorDef(
       "=", i64_t, VarDeclarationPtr("this", TypeRef{i64_t, RefTypes::ref}),
       VarDeclarationPtr("RHS", i64_t), root, detail::store, true);
-  const OperatorDef addi =
+  OperatorDef addi =
       OperatorDef("+", i64_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::addi);
-  const OperatorDef subi =
+  OperatorDef subi =
       OperatorDef("-", i64_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::subi);
-  const OperatorDef muli =
+  OperatorDef muli =
       OperatorDef("*", i64_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::muli);
-  const OperatorDef divi =
+  OperatorDef divi =
       OperatorDef("/", i64_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::divi);
-  const OperatorDef eqi =
+  OperatorDef eqi =
       OperatorDef("==", bool_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::cmpeq);
-  const OperatorDef neqi =
+  OperatorDef neqi =
       OperatorDef("!=", bool_t, VarDeclarationPtr("LHS", i64_t),
                   VarDeclarationPtr("RHS", i64_t), root, detail::cmpneq);
-  const OperatorDef struct_assignment =
+  OperatorDef struct_assignment =
       OperatorDef("=", TypeRef(type_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(type_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", type_t), root, detail::assign, true);
-  const OperatorDef str_assignment =
+  OperatorDef str_assignment =
       OperatorDef("=", TypeRef(str_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(str_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", str_t), root, detail::store, true);
-  const OperatorDef bool_assignment =
+  OperatorDef bool_assignment =
       OperatorDef("=", TypeRef(bool_t, RefTypes::ref),
                   VarDeclarationPtr("this", TypeRef(bool_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", bool_t), root, detail::store, true);

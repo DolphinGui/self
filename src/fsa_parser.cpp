@@ -509,11 +509,11 @@ struct GlobalParser {
       auto expr = parseExpr(t, context);
       auto type = self::getLiteralType(*expr);
       curr->type_ref = {&type.ptr, type.is_ref};
-      context.insert({curr->getName(), std::cref(*curr)});
+      context.insert({curr->getName(), std::ref(*curr)});
       return curr;
     } else {
       errReport(notReserved(*t), "non-reserved Token expected in expression");
-      context.insert({curr->getName(), std::cref(*curr)});
+      context.insert({curr->getName(), std::ref(*curr)});
       return parseExpr(t, context, [&](self::ExprTree &tree) {
         tree.push_back(std::move(curr));
       });

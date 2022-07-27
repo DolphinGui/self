@@ -107,7 +107,7 @@ template <typename Derive> struct NameMangling {
 using ExprRef = std::reference_wrapper<ExprBase>;
 using ExprConstRef = std::reference_wrapper<const ExprBase>;
 using ExpressionList = std::vector<ExprPtr>;
-using SymbolMap = std::unordered_multimap<TokenView, ExprConstRef>;
+using SymbolMap = std::unordered_multimap<TokenView, ExprRef>;
 class Index;
 enum struct FullyResolved : bool { Resolved, Unresolved };
 std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&, Index &local);

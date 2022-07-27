@@ -35,7 +35,7 @@ self::LexedFileRef parseToken(std::string &whole) {
   std::vector<unsigned> line_pos;
   line_pos.push_back(0);
   while (RE2::FindAndConsume(
-      &input, R"(((?:->|'.+?'|".+?")|[(){}[\];,<>:]|[^<>\s(){};,[\]'":]+))",
+      &input, R"(((?:->|'.+?'|".+?")|[(){}[\];,:.]|[^\s(){};,[\]'":.]+))",
       &cur_token)) {
     token_list.push_back(std::string_view(cur_token.data(), cur_token.size()));
     if (std::string_view(cur_token) == self::reserved::endl) {

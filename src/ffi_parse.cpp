@@ -133,7 +133,7 @@ void parseFFI(ExprTree &in, Index &context, Context &c,
           for (auto i = 0; i < argc; ++i) {
             addArg(clang_Cursor_getArgument(cursor, i), *f, data.context);
           }
-          data.symbols.insert({f->getName(), std::cref(*f)});
+          data.symbols.insert({f->getName(), std::ref(*f)});
           data.tree.push_back(std::move(f));
           break;
         }
