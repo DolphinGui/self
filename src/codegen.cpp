@@ -152,44 +152,45 @@ struct Generator {
   }
   llvm::Value *generateCall(const self::FunctionCall &fun,
                             llvm::IRBuilder<> &builder, self::Context &c) {
-    llvm::Value *result = nullptr;
     switch (fun.getDefinition().internal) {
     case self::detail::addi:
-      result = builder.CreateAdd(dispatch(fun.lhs.get(), builder, c),
-                                 dispatch(fun.rhs.get(), builder, c));
+      return builder.CreateAdd(dispatch(fun.lhs.get(), builder, c),
+                               dispatch(fun.rhs.get(), builder, c));
       break;
     case self::detail::store:
-      result = builder.CreateStore(dispatch(fun.rhs.get(), builder, c),
-                                   dispatch(fun.lhs.get(), builder, c, false));
+      return builder.CreateStore(dispatch(fun.rhs.get(), builder, c),
+                                 dispatch(fun.lhs.get(), builder, c, false));
       break;
     case self::detail::subi:
-      result = builder.CreateSub(dispatch(fun.lhs.get(), builder, c),
-                                 dispatch(fun.rhs.get(), builder, c));
+      return builder.CreateSub(dispatch(fun.lhs.get(), builder, c),
+                               dispatch(fun.rhs.get(), builder, c));
       break;
     case self::detail::muli:
-      result = builder.CreateMul(dispatch(fun.lhs.get(), builder, c),
-                                 dispatch(fun.rhs.get(), builder, c));
+      return builder.CreateMul(dispatch(fun.lhs.get(), builder, c),
+                               dispatch(fun.rhs.get(), builder, c));
       break;
     case self::detail::divi:
-      result = builder.CreateSDiv(dispatch(fun.lhs.get(), builder, c),
-                                  dispatch(fun.rhs.get(), builder, c));
+      return builder.CreateSDiv(dispatch(fun.lhs.get(), builder, c),
+                                dispatch(fun.rhs.get(), builder, c));
       break;
     case self::detail::call:
       return generateFunCall(fun, builder, c);
       break;
     case self::detail::assign:
     case self::detail::cmpeq:
-      result = builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder, c),
-                                    dispatch(fun.rhs.get(), builder, c));
+      return builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder, c),
+                                  dispatch(fun.rhs.get(), builder, c));
       break;
     case self::detail::cmpneq:
-      result = builder.CreateICmpNE(dispatch(fun.lhs.get(), builder, c),
-                                    dispatch(fun.rhs.get(), builder, c));
+      return builder.CreateICmpNE(dispatch(fun.lhs.get(), builder, c),
+                                  dispatch(fun.rhs.get(), builder, c));
       break;
+    case self::detail::addr:
+      return dispatch(fun.rhs.get(), builder, c);
     default:
       throw std::runtime_error("This shouldn't happen");
     }
-    return result;
+    return nullptr;
   }
 
   llvm::Value *createString(const self::StringLit &str, llvm::Module &m) {

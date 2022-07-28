@@ -263,6 +263,8 @@ struct GlobalParser {
                    dynamic_cast<const self::UnevaluatedExpression *>(e)) {
       return coerce;
     }
+
+    auto t = e->getName();
     auto etype = e->getType();
     if (etype.ptr == type.ptr) {
       if (etype.depth == type.depth)
@@ -270,11 +272,19 @@ struct GlobalParser {
       else if (etype.depth - 1 == type.depth)
         return coerce;
     }
+
+    // hardcoded ref assignment check
+    if (type.ptr == &c.deduced_t) {
+      if (etype.depth - 1 == type.depth)
+        return match;
+    }
+
     return mismatch;
   }
 
   static bool coerceType(self::ExprBase *e, self::TypePtr type) {
     if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
+      auto t = var->getDemangledName();
       if (!var->type_ref.ptr) {
         var->type_ref = type;
         if (type.depth == 0)
@@ -418,13 +428,18 @@ struct GlobalParser {
       result->rhs = std::move(*rhs);
       return result;
     };
-    auto bin_coerce = [](const self::OperatorDef &fun, auto &lhs, auto &rhs) {
+    auto bin_coerce = [this](const self::OperatorDef &fun, auto &lhs,
+                             auto &rhs) {
       if (fun.internal == self::detail::assign ||
           fun.internal == self::detail::store) {
         auto &var = dynamic_cast<self::VarDeclaration &>(*lhs);
         var.value = rhs.get();
       }
-      coerceType(lhs.get(), fun.lhs->getDecltype());
+      if (auto n = fun.lhs->getDecltype(); n.ptr == &c.deduced_t) {
+        coerceType(lhs.get(), rhs.get()->getType());
+      } else {
+        coerceType(lhs.get(), n);
+      }
       coerceType(rhs.get(), fun.rhs->getDecltype());
     };
     // left-right associative pass
@@ -449,7 +464,7 @@ struct GlobalParser {
           binInsert, bin_coerce, local);
     }
     errReport(tree.size() == 1, "tree is not fully resolved");
-    return self::foldExpr(std::move(tree.back()), local).first;
+    return std::move(tree.back());
   }
 
   self::ExprPtr parseSymbol(self::ExprPtr &base, self::Index &local) {

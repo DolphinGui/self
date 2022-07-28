@@ -42,11 +42,11 @@ struct TypeRef {
     using enum RefTypes;
     return left.ptr == right.ptr && left.is_ref == right.is_ref;
   }
-  std::string dump()const{
+  std::string dump() const {
     std::string result;
     result.append(ptr.getTypename());
     auto i = depth;
-    while(i--){
+    while (i--) {
       result.push_back('*');
     }
     return result;
@@ -81,11 +81,11 @@ struct TypePtr {
     }
     return {*ptr, is_ref};
   }
-  std::string dump()const{
+  std::string dump() const {
     std::string result;
     result.append(ptr->getTypename());
     auto i = depth;
-    while(i--){
+    while (i--) {
       result.push_back('*');
     }
     return result;
@@ -106,6 +106,14 @@ struct ExprBase {
   virtual bool isCompiletime() const noexcept { return false; }
   virtual ExprPtr clone() const = 0;
 };
+
+inline auto cloneif(ExprPtr &&e) {
+  if (e) {
+    return e->clone();
+  } else {
+    return ExprPtr(nullptr);
+  }
+}
 
 #ifdef SELF_FMT_FORMATTABLE
 }

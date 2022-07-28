@@ -21,8 +21,7 @@ public:
 
   inline std::ostream &print(std::ostream &out) const override {
     if (type_ref.ptr)
-      return out << "var " << demangle(name) << ": "
-                 << type_ref.ptr->getTypename();
+      return out << "var " << demangle(name) << ": " << type_ref.dump();
     else
       return out << "var  " << demangle(name);
   }

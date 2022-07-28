@@ -107,8 +107,8 @@ struct Context {
                   VarDeclarationPtr("this", TypeRef(bool_t, RefTypes::ref)),
                   VarDeclarationPtr("RHS", bool_t), root, detail::store, true);
   FunctionDef ref_cast = FunctionDef(
-      "ref", root, TypeRef(deduced_t, RefTypes::ref, 2), false,
-      VarDeclarationPtr("arg", TypeRef(deduced_t, RefTypes::ref, 2)));
+      detail::addr, "ref", root, TypeRef(deduced_t, RefTypes::ref, 2), false,
+      VarDeclarationPtr("arg", TypeRef(deduced_t, RefTypes::ref)));
   OperatorDef ref_assignment = OperatorDef(
       "=", TypeRef(deduced_t, RefTypes::ref),
       VarDeclarationPtr("this", TypeRef(deduced_t, RefTypes::ref)),

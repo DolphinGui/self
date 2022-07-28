@@ -22,7 +22,8 @@ enum BuiltinInstruction {
   divi,
   cmpeq,
   cmpneq,
-  assign
+  assign,
+  addr
 };
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }
 inline void iterate(auto lambda, auto &&arg, auto &&...args) {
@@ -131,6 +132,14 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
   }
+  FunctionDef(detail::BuiltinInstruction b, TokenView name, Index &parent,
+              TypeRef return_type, bool member = false, auto &&...args)
+      : FunBase(mangle(name), return_type, parent, member, detail::call) {
+    internal = b;
+    arguments.reserve(sizeof...(args));
+    detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
+                    std::move(args)...);
+  }
   FunctionDef(const FunctionDef &other) : FunBase(other) {
     std::for_each(other.arguments.cbegin(), other.arguments.cend(),
                   [&](const auto &o) {
@@ -168,7 +177,7 @@ public:
   FunctionCall(const FunBase &callee, ExprPtr &&LHS, ExprPtr &&RHS)
       : definition(callee), lhs(std::move(LHS)), rhs(std::move(RHS)) {}
   FunctionCall(const FunctionCall &other)
-      : definition(other.definition), lhs(other.lhs->clone()),
+      : definition(other.definition), lhs(cloneif(other.lhs->clone())),
         rhs(other.rhs->clone()) {}
   inline std::ostream &print(std::ostream &out) const override {
     if (lhs)
@@ -199,7 +208,9 @@ public:
     // to pass a global object to this
     if (definition.return_type.ptr->getTypename() == "deduced") {
       // super hardcoded for ref_assignment rn
-      return rhs->getType();
+      auto r = rhs->getType();
+      ++r.depth;
+      return r;
     }
     return definition.return_type;
   }

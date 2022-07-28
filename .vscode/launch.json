@@ -9,7 +9,10 @@
       "request": "launch",
       "name": "selfc",
       "program": "${workspaceFolder}/build/selfc",
-      "args": ["test2.me", "libselfstd.a"],
+      "args": [
+        "test2.me",
+        "libselfstd.a"
+      ],
       "cwd": "${workspaceFolder}/build"
     },
     {
@@ -41,12 +44,21 @@
       "cwd": "${workspaceFolder}/build"
     },
     {
+      "type": "gdb",
+      "request": "launch",
+      "name": "lex_test-gdb",
+      "target": "${workspaceFolder}/build/lex_test",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "parseText"
+    },
+    {
       "type": "lldb",
       "request": "launch",
       "name": "integration_test",
       "program": "${workspaceFolder}/build/integration_test",
       "cwd": "${workspaceFolder}/build"
-    }, {
+    },
+    {
       "type": "gdb",
       "request": "launch",
       "name": "integration_test-gdb",
@@ -54,6 +66,5 @@
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "parseText"
     },
-    
   ]
 }
