@@ -1,6 +1,7 @@
 #pragma once
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
+#include "builtins.hpp"
 #include <memory>
 namespace self {
 struct Ret : public ExprImpl<Ret> {
@@ -19,6 +20,12 @@ struct Ret : public ExprImpl<Ret> {
       return value->isComplete();
     }
     return true;
+  }
+  TypePtr getRetType(self::Context &c) const noexcept {
+    if (!value)
+      return {c.void_t};
+    else
+      return value->getType();
   }
 };
 

@@ -103,19 +103,27 @@ struct TokenIt {
   TokenIt(self::LexedFileRef &where) : where(where) {}
   self::LexedFileRef &where;
   size_t pos = 0;
+  size_t col = 0, line = 0;
+  self::Pos coord() const noexcept { return {col, line}; }
   self::TokenView operator*() { return where.tokens.at(pos); }
   TokenIt &operator++() {
-    if (pos >= where.tokens.size()) {
+    if (pos > where.tokens.size()) {
       throw std::runtime_error("out of bounds");
     }
     ++pos;
+    if (!end() && self::reserved::isEndl(**this)) {
+      col = 0;
+      ++line;
+    } else {
+      ++col;
+    }
     return *this;
   }
   TokenIt &operator--() {
     if (pos >= where.tokens.size()) {
       throw std::runtime_error("out of bounds");
     }
-    ++pos;
+    --pos;
     return *this;
   }
   TokenIt operator++(int) {
@@ -129,7 +137,7 @@ struct TokenIt {
   size_t nextLineLength() const {
     TokenIt tmp = *this;
     size_t length = 0;
-    while (*tmp != self::reserved::endl) {
+    while (!self::reserved::isEndl(*tmp)) {
       ++tmp;
       ++length;
     }
@@ -138,39 +146,20 @@ struct TokenIt {
   size_t prevLineLength() const {
     TokenIt tmp = *this;
     size_t length = 0;
-    while (*tmp != self::reserved::endl) {
+    while (!self::reserved::isEndl(*tmp)) {
       --tmp;
       ++length;
     }
     return length;
   }
-  auto getCol() const {
-    // bubble search may be naive
-    // but probably works better for
-    // small sized n's
-    unsigned prev = 0;
-    for (auto length : where.line_pos) {
-      if (length > pos) {
-        return pos - prev;
-      }
-      prev = length;
-    }
-    throw std::logic_error("Failed to get line column");
-  }
-
-  auto getRow() const {
-    size_t count = 0;
-    for (auto length : where.line_pos) {
-      if (length > pos) {
-        return count;
-      }
-      ++count;
-    }
-    throw std::logic_error("Failed to get line column");
-  }
 
 private:
   TokenIt(self::LexedFileRef &where, size_t pos) : where(where), pos(pos) {}
+};
+
+struct ErrException {
+  size_t col, line;
+  std::string_view what;
 };
 
 struct GlobalParser {
@@ -199,7 +188,7 @@ struct GlobalParser {
             if (close_paren->getToken() == "(") {
               processSubtrees(tree, close, end);
             } else if (close_paren->getToken() == ")") {
-              auto subtree = std::make_unique<self::ExprTree>();
+              auto subtree = self::makeExpr<self::ExprTree>({open_paren->pos});
               subtree->reserve(std::distance(open + 1, close));
               std::for_each(open + 1, close, [&](self::ExprPtr &e) {
                 subtree->emplace_back(std::move(e));
@@ -217,9 +206,11 @@ struct GlobalParser {
     return processSubtrees(tree, tree.begin(), tree.end());
   }
 
+  // notably there is only ever 1 tuple in the tree
+  // since recursive tuples are processed first recursively
   void processTuples(self::ExprTree &tree, self::Index &context) {
     size_t size = 0;
-    auto tuple = std::make_unique<self::Tuple>();
+    auto tuple = self::makeExpr<self::Tuple>(tree.at(0)->pos);
     auto mark = tree.begin();
     for (auto it = tree.begin(); it != tree.end(); ++it, ++size) {
       if (auto *comma = dynamic_cast<self::UnevaluatedExpression *>(it->get());
@@ -264,7 +255,6 @@ struct GlobalParser {
       return coerce;
     }
 
-    auto t = e->getName();
     auto etype = e->getType();
     if (etype.ptr == type.ptr) {
       if (etype.depth == type.depth)
@@ -345,13 +335,13 @@ struct GlobalParser {
       }
       if (!no_coerce.empty()) {
         errReport(no_coerce.size() == 1, "ambiguous operator call");
-        auto result = insert(no_coerce.back(), lhs, rhs);
+        auto result = insert(no_coerce.back(), lhs, rhs, no_coerce.back()->pos);
         cleanup(lhs, rhs);
         *it = std::move(result);
       } else if (!coerced.empty()) {
         errReport(coerced.size() == 1, "ambiguous operator call");
         coerce(*coerced.back(), *lhs, *rhs);
-        auto result = insert(coerced.back(), lhs, rhs);
+        auto result = insert(coerced.back(), lhs, rhs, coerced.back()->pos);
         cleanup(lhs, rhs);
         *it = std::move(result);
       }
@@ -360,7 +350,7 @@ struct GlobalParser {
 
   self::ExprPtr evaluateTree(self::ExprTree &tree, self::Index &local) {
     if (tree.empty()) {
-      return std::make_unique<self::Tuple>();
+      return self::makeExpr<self::Tuple>(tree.pos);
     }
     processSubtrees(tree);
     for (auto &ptr : tree) {
@@ -387,8 +377,8 @@ struct GlobalParser {
             return false;
           },
           [&](auto lhs, auto rhs) { tree.erase(rhs); },
-          [&](const self::FunctionDef *fun, auto lhs, auto rhs) {
-            auto result = std::make_unique<self::FunctionCall>(*fun);
+          [&](const self::FunctionDef *fun, auto lhs, auto rhs, self::Pos p) {
+            auto result = self::makeExpr<self::FunctionCall>(p,*fun);
             if (auto *tuple = dynamic_cast<self::Tuple *>(rhs->get())) {
               result->rhs =
                   std::make_unique<self::arg_pack>(std::move(*tuple));
@@ -419,8 +409,9 @@ struct GlobalParser {
       }
       return false;
     };
-    auto binInsert = [](const self::OperatorDef *o, auto lhs, auto rhs) {
-      auto result = std::make_unique<self::FunctionCall>(*o);
+    auto binInsert = [](const self::OperatorDef *o, auto lhs, auto rhs,
+                        self::Pos p) {
+      auto result = self::makeExpr<self::FunctionCall>(p, *o);
       if (auto *var = dynamic_cast<self::VarDeclaration *>(lhs->get())) {
         var->value = rhs->get();
       }
@@ -472,20 +463,20 @@ struct GlobalParser {
         maybe && !maybe->isComplete()) {
       auto t = maybe->getToken();
       if (auto [is_int, number] = isInt(t); is_int) {
-        return std::make_unique<self::IntLit>(number, c);
+        return self::makeExpr<self::IntLit>(base->pos, number, c);
       } else if (auto [result, str] = isStr(t); result) {
-        return std::make_unique<self::StringLit>(str, c);
+        return self::makeExpr<self::StringLit>(base->pos, str, c);
       } else if (auto [result, boolean] = isBool(t); result) {
-        return std::make_unique<self::BoolLit>(boolean, c);
+        return self::makeExpr<self::BoolLit>(base->pos, boolean, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
-        return std::make_unique<self::BuiltinTypeLit>(
-            self::BuiltinTypeLit::get(t, c));
+        return self::makeExpr<self::BuiltinTypeLit>(
+            base->pos, self::BuiltinTypeLit::get(t, c));
       } else if (auto varname = self::VarDeclaration::mangle(t);
                  local.contains(varname)) {
         errReport(local.isUnique(varname), "ODR var declaration rule violated");
-        return std::make_unique<self::VarDeref>(
-            dynamic_cast<const self::VarDeclaration &>(
-                local.find(varname)->get()));
+        return self::makeExpr<self::VarDeref>(
+            base->pos, dynamic_cast<const self::VarDeclaration &>(
+                           local.find(varname)->get()));
       }
     }
     return std::move(base);
@@ -493,7 +484,7 @@ struct GlobalParser {
   using callback = std::function<void(self::ExprTree &)>;
 
   constexpr static auto default_end = [](self::TokenView t) -> bool {
-    return t == self::reserved::endl || t == "}";
+    return self::reserved::isEndl(t) || t == "}";
   };
 
   self::ExprPtr
@@ -510,7 +501,8 @@ struct GlobalParser {
         auto name = *++t;
         tree.push_back(parseVar(++t, name, context));
       } else {
-        tree.push_back(std::make_unique<self::UnevaluatedExpression>(*t++));
+        tree.push_back(
+            self::makeExpr<self::UnevaluatedExpression>({t.col, t.line}, *t++));
       }
     }
     return evaluateTree(tree, context);
@@ -527,7 +519,7 @@ struct GlobalParser {
       }
     };
     guard(name);
-    auto curr = std::make_unique<self::VarDeclaration>(name);
+    auto curr = self::makeExpr<self::VarDeclaration>(t.coord(), name);
     if (*t == ":") {
       ++t;
       auto expr = parseExpr(t, context);
@@ -545,7 +537,7 @@ struct GlobalParser {
   }
 
   void consumeNullExpr(TokenIt &t) {
-    if (*t == self::reserved::endl)
+    if (self::reserved::isEndl(*t))
       ++t;
   }
 
@@ -553,16 +545,17 @@ struct GlobalParser {
     // this exists to silence a warning about side-effects in typeid expressions
     if (*t == "{") {
       ++t;
-      return std::make_unique<self::Block>(parseBlock(t, parent.contexts));
+      return self::makeExpr<self::Block>(t.coord(),
+                                         parseBlock(t, parent.contexts));
     }
-    auto results = std::make_unique<self::Block>(parent.contexts);
+    auto results = self::makeExpr<self::Block>(t.coord(), parent.contexts);
     results->push_back(parseExpr(t, results->contexts));
     return results;
   };
 
   void parseIf(TokenIt &t, self::Block &body) {
     ++t;
-    auto if_statement = std::make_unique<self::If>();
+    auto if_statement = self::makeExpr<self::If>(t.coord());
 
     if_statement->condition =
         parseExpr(t, body.contexts, nullptr, [](self::TokenView t) -> bool {
@@ -582,6 +575,7 @@ struct GlobalParser {
 
   void parseWhile(TokenIt &t, self::Block &body) {
     self::ExprPtr condition;
+    auto p = t.coord();
     if (*t == self::reserved::while_t) {
       ++t;
       condition =
@@ -604,8 +598,8 @@ struct GlobalParser {
       condition = parseExpr(t, body.contexts);
       ++t;
     }
-    body.push_back(std::make_unique<self::While>(std::move(block),
-                                                 std::move(condition), is_do));
+    body.push_back(self::makeExpr<self::While>(p, std::move(block),
+                                               std::move(condition), is_do));
   }
 
   self::Block parseBlock(TokenIt &t, self::Index &parent) {
@@ -617,11 +611,11 @@ struct GlobalParser {
         body.push_back(parseVar(++t, name, body.contexts));
       } else if (*t == return_t) {
         ++t;
-        if (*t != endl) {
-          body.push_back(
-              std::make_unique<self::Ret>(parseExpr(t, body.contexts)));
+        if (!self::reserved::isEndl(*t)) {
+          body.push_back(self::makeExpr<self::Ret>(
+              t.coord(), parseExpr(t, body.contexts)));
         } else {
-          body.push_back(std::make_unique<self::Ret>());
+          body.push_back(self::makeExpr<self::Ret>(t.coord()));
         }
       } else if (*t == if_t) {
         parseIf(t, body);
@@ -639,13 +633,13 @@ struct GlobalParser {
 
   self::ExprPtr parseFun(TokenIt &t, self::TokenView name,
                          self::Index &parent) {
-    auto curr = std::make_unique<self::FunctionDef>(name, parent);
+    auto curr = self::makeExpr<self::FunctionDef>(t.coord(), name, parent);
     errReport(*t++ == "(", "\"(\" expected");
     while (*t != ")") {
       errReport(notReserved(*t),
                 "reserved Token cannot be used as parameter name");
       curr->arguments.emplace_back(
-          std::make_unique<self::VarDeclaration>(*t++));
+          self::makeExpr<self::VarDeclaration>(t.coord(), *t++));
       errReport(*t++ == ":", "\":\" expected here");
       constexpr auto commaOrParen = [](self::TokenView t) {
         return t == "," || t == ")";
@@ -662,7 +656,7 @@ struct GlobalParser {
     if (*++t == "->") {
       ++t;
       constexpr auto commaOrBracket = [](self::TokenView t) {
-        return t == self::reserved::endl || t == "{";
+        return self::reserved::isEndl(t) || t == "{";
       };
       auto e = parseExpr(t, parent, nullptr, commaOrBracket);
       auto type = self::getLiteralType(*e);
@@ -673,6 +667,24 @@ struct GlobalParser {
       ++t;
       curr->body.emplace(parseBlock(t, parent));
       curr->body_defined = true;
+      if (curr->return_type.ptr == nullptr) {
+        self::TypePtr type{};
+        for (auto &expr : *curr->body) {
+          if (auto ret = dynamic_cast<self::Ret *>(expr.get())) {
+            if (!type.ptr) {
+              type = ret->getRetType(c);
+            } else {
+              errReport(type != ret->getRetType(c),
+                        "Cannot deduce return type of function.");
+            }
+          }
+        }
+        if (type.ptr == nullptr) {
+          curr->return_type.ptr = &c.void_t;
+        } else {
+          curr->return_type = type;
+        }
+      }
     }
     parent.insert({curr->name, *curr});
     return curr;
@@ -683,15 +695,16 @@ struct GlobalParser {
     auto identity = std::string("struct");
     identity.append(std::to_string(id++));
     errReport(*t == "{" || *t == "(", "Expected a \"{\" or \"(\"");
+    auto p = t.coord();
     if (*t == "(") {
       ++t;
       if (*t == ")") {
         ++t;
-        return std::make_unique<self::StructDef>(0, parent);
+        return self::makeExpr<self::StructDef>(p, 0, parent);
       } else {
         auto [success, size] = isInt(*t++);
         errReport(success, "Expected integer or \")\"");
-        return std::make_unique<self::StructDef>(size, parent);
+        return self::makeExpr<self::StructDef>(p, size, parent);
       }
     } else {
       auto result = self::StructDef(parent);
@@ -705,14 +718,14 @@ struct GlobalParser {
           errReport(notReserved(name), "function name is reserved");
           result.body.push_back(parseFun(++t, name, result.context));
         } else {
-          errReport(*t == self::reserved::endl,
+          errReport(self::reserved::isEndl(*t),
                     "expected a function or variable declaration.");
           ++t;
         }
       }
       ++t;
       result.identity = id;
-      return std::make_unique<self::StructLit>(std::move(result), c);
+      return self::makeExpr<self::StructLit>(p, std::move(result), c);
     }
   }
 
@@ -777,11 +790,11 @@ struct GlobalParser {
         } else if (*t == "extern") {
           processExtern(++t, syntax_tree);
         } else {
-          errReport(*t++ == endl, "invalid expression");
+          errReport(self::reserved::isEndl(*t++), "invalid expression");
         }
       }
     } catch (std::runtime_error e) {
-      err.errors.push_back(self::Error{t.getCol(), t.getRow(), e.what()});
+      err.errors.push_back(self::Error{t.col, t.line, e.what()});
       while (*t != ";")
         ++t;
       goto retry;

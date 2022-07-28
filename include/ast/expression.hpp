@@ -8,6 +8,7 @@
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -59,6 +60,7 @@ struct TypePtr {
   RefTypes is_ref = RefTypes::value;
   uint8_t depth = 0;
   bool is_mutable = false;
+  TypePtr() = default;
   TypePtr(const Type *ptr) : ptr{ptr} {}
   TypePtr(const Type *ptr, RefTypes ref) : ptr{ptr}, is_ref(ref) {
     if (ref == RefTypes::ref)
@@ -92,9 +94,13 @@ struct TypePtr {
   }
 };
 
+struct Pos {
+  size_t col, line;
+};
 struct ExprBase;
 using ExprPtr = std::unique_ptr<ExprBase>;
 struct ExprBase {
+  Pos pos;
   virtual ~ExprBase() = default;
   virtual bool isComplete() const { return true; }
   virtual TypePtr getType() const noexcept { return {nullptr}; }
@@ -106,6 +112,21 @@ struct ExprBase {
   virtual bool isCompiletime() const noexcept { return false; }
   virtual ExprPtr clone() const = 0;
 };
+
+template <typename T, typename... Args>
+inline std::unique_ptr<T> makeExpr(Pos pos, Args &&...args) {
+  static_assert(std::is_base_of_v<ExprBase, T>, "T must derive from ExprBase");
+  auto result = std::make_unique<T>(std::forward<Args>(args)...);
+  result->pos = pos;
+  return result;
+}
+
+template <typename T> inline std::unique_ptr<T> makeExpr(Pos pos) {
+  static_assert(std::is_base_of_v<ExprBase, T>, "T must derive from ExprBase");
+  auto result = std::make_unique<T>();
+  result->pos = pos;
+  return result;
+}
 
 inline auto cloneif(ExprPtr &&e) {
   if (e) {

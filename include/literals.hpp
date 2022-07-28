@@ -74,28 +74,28 @@ constexpr inline auto list = {
 constexpr inline auto qualifiers = {
     align_t,  compiletime_t, runtime_t, const_t,  volatile_t, export_t,
     import_t, for_t,         friend_t,  inline_t, muta_t};
-bool inline constexpr isKeyword(TokenView t) {
+inline bool constexpr isKeyword(TokenView t) {
   for (auto a : list) {
     if (a == t)
       return true;
   }
   return false;
 }
-inline constexpr TokenView endl = ";";
-constexpr inline std::initializer_list<const char *> grammar = {
-    ";", ",", " ", "(", ")", "{", "}", "\"", ":"};
-bool inline isGrammar(TokenView t) {
+inline bool isEndl(TokenView t) { return t == ";" || t == "\03"; }
+constexpr inline auto grammar = {"\03", ";", ",", " ",  "(",
+                                 ")",  "{", "}", "\"", ":"};
+inline bool isGrammar(TokenView t) {
   for (auto g : grammar) {
     if (t == g)
       return true;
   }
   return false;
 }
-bool inline constexpr is_reserved(TokenView t) {
+inline bool constexpr is_reserved(TokenView t) {
   return isKeyword(t) || isGrammar(t);
 }
 
-bool inline constexpr is_qualifier(TokenView t) {
+inline bool constexpr is_qualifier(TokenView t) {
   for (auto a : qualifiers) {
     if (a == t)
       return true;

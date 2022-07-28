@@ -23,7 +23,10 @@ namespace detail {
 std::string &preprocess(std::string &contents) {
   RE2::GlobalReplace(&contents, R"(\/\/.*?\n)", " ");
   RE2::GlobalReplace(&contents, R"(\/\*[\S\s]*?\*\/)", " ");
-  RE2::GlobalReplace(&contents, "\n", ";");
+  // funny thing is regex doesn't capture newline all that
+  // well so it's replaced with a character I assume won't
+  // turn up in normal files
+  RE2::GlobalReplace(&contents, "\n", "\03");
   contents.push_back(';');
   return contents;
 }
@@ -35,10 +38,10 @@ self::LexedFileRef parseToken(std::string &whole) {
   std::vector<unsigned> line_pos;
   line_pos.push_back(0);
   while (RE2::FindAndConsume(
-      &input, R"(((?:->|'.+?'|".+?")|[(){}[\];,:.]|[^\s(){};,[\]'":.]+))",
+      &input, R"(((?:->|'.+?'|".+?")|[(){}[\];,:.\03]|[^\s(){};,[\]'":.\03]+))",
       &cur_token)) {
     token_list.push_back(std::string_view(cur_token.data(), cur_token.size()));
-    if (std::string_view(cur_token) == self::reserved::endl) {
+    if (cur_token == "\n") {
       auto pos = std::distance(static_cast<const char *>(whole.data()),
                                cur_token.data());
       line_pos.push_back(pos);

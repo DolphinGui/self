@@ -10,7 +10,7 @@
 
 constexpr auto reference = "var a = 21; var b = ref(a)";
 constexpr auto while_inline =
-    "fun b()->i64; fun function(){var a = false; while a; b();}";
+    "fun b()->i64; fun function(){var a = false\n while a; b();}";
 constexpr auto do_while =
     "fun function(){var a = false; do var b = 32;while a;}";
 constexpr auto if_else =
@@ -44,10 +44,10 @@ int main() {
       fmt::print("{}", *ex);
     }
     if (results.ast.isComplete()) {
-      fmt::print("type is complete\n");
+      fmt::print("\ntype is complete\n");
     } else {
-      fmt::print("type is not complete\n");
+      fmt::print("\ntype is not complete\n");
     }
-    fmt::print("{}", results.errs);
+    fmt::print("{}\n\n", results.errs);
   }
 }
