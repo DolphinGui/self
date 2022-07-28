@@ -23,7 +23,8 @@ enum BuiltinInstruction {
   cmpeq,
   cmpneq,
   assign,
-  addr
+  addr,
+  assignaddr
 };
 inline void iterate(auto lambda, auto &&arg) { lambda(arg); }
 inline void iterate(auto lambda, auto &&arg, auto &&...args) {

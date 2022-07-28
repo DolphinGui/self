@@ -19,15 +19,10 @@
 // not necessary.
 constexpr auto file = "extern \"C\" import \"../stdlib/include/io.h\"\n"
                       "fun main()->i64{\n"
-                      "  var a = \"hello world!\\n\"\n"
-                      "  var b = randomnumber()\n"
-                      "  var n = ref(a)\n"
-                      "  var c: i64\n"
-                      "  if b == 6; c = 2;else c = 4;"
-                      "  while b != 0 {"
-                      "    selfprint(n)\n"
-                      "    b = b - 1\n"
-                      "  }"
+                      "  var a = 123\n"
+                      "  var b = ref(a)\n"
+                      "  printnum(a)\n"
+                      "  printnum(b)\n"
                       "  return 0\n"
                       "}";
 constexpr auto path = "a.o";
@@ -56,6 +51,7 @@ auto get_stdlib() {
 int main() {
   self::Context c;
   llvm::LLVMContext llvm;
+  llvm.enableOpaquePointers();
   auto stdlib = get_stdlib();
   auto f = std::string(file);
   auto AST = self::parseFile(f, c);

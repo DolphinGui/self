@@ -156,37 +156,42 @@ struct Generator {
     case self::detail::addi:
       return builder.CreateAdd(dispatch(fun.lhs.get(), builder, c),
                                dispatch(fun.rhs.get(), builder, c));
-      break;
+
     case self::detail::store:
       return builder.CreateStore(dispatch(fun.rhs.get(), builder, c),
                                  dispatch(fun.lhs.get(), builder, c, false));
-      break;
+
     case self::detail::subi:
       return builder.CreateSub(dispatch(fun.lhs.get(), builder, c),
                                dispatch(fun.rhs.get(), builder, c));
-      break;
+
     case self::detail::muli:
       return builder.CreateMul(dispatch(fun.lhs.get(), builder, c),
                                dispatch(fun.rhs.get(), builder, c));
-      break;
+
     case self::detail::divi:
       return builder.CreateSDiv(dispatch(fun.lhs.get(), builder, c),
                                 dispatch(fun.rhs.get(), builder, c));
-      break;
+
     case self::detail::call:
       return generateFunCall(fun, builder, c);
-      break;
+
     case self::detail::assign:
     case self::detail::cmpeq:
       return builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder, c),
                                   dispatch(fun.rhs.get(), builder, c));
-      break;
+
     case self::detail::cmpneq:
       return builder.CreateICmpNE(dispatch(fun.lhs.get(), builder, c),
                                   dispatch(fun.rhs.get(), builder, c));
-      break;
-    case self::detail::addr:
-      return dispatch(fun.rhs.get(), builder, c);
+
+    case self::detail::addr: {
+      return dispatch(fun.rhs.get(), builder, c, false);
+      // return builder.CreateLoad(llvm::PointerType::get(context, 0), ptr);
+    }
+    case self::detail::assignaddr:
+      return builder.CreateStore(dispatch(fun.rhs.get(), builder, c, false),
+                                 dispatch(fun.lhs.get(), builder, c, false));
     default:
       throw std::runtime_error("This shouldn't happen");
     }
@@ -303,6 +308,11 @@ struct Generator {
     } else if (type == typeid(self::VarDeref)) {
       auto var = dynamic_cast<const self::VarDeref &>(*expr);
       auto result = var_map.at(self::VarDeclaration::demangle(var.getName()));
+      if (var.definition.getDecltype().depth > 0) {
+        auto load =
+            builder.CreateLoad(llvm::PointerType::get(context, 0), result);
+        return load;
+      }
       if (!return_val)
         return result;
       else

@@ -5,6 +5,15 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "type": "gdb",
+      "request": "launch",
+      "name": "IR_test",
+      "target": "${workspaceRoot}/build/IR_test",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "parseText"
+    },
+  
+    {
       "type": "lldb",
       "request": "launch",
       "name": "selfc",

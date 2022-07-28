@@ -14,16 +14,11 @@ uint64_t selfprint(const セルフprimative_strview *s) {
   }
   return 0;
 }
-uint64_t printmulti(unsigned char c, uint64_t n) {
-  for (int64_t i = 0; i < n; i++) {
-    int result = fputc((int)c, stdout);
-    if (errno) {
-      fputs(strerror(result), stderr);
-      return errno;
-    }
-  }
-  return 0;
-}
 int64_t geterrno() { return errno; }
 // haha I lied
 int64_t randomnumber() { return 6; }
+
+int64_t printnum(int64_t *number) {
+  fprintf(stdout, "%ld\n", *number);
+  return 0;
+}

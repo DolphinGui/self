@@ -113,7 +113,7 @@ struct Context {
       "=", TypeRef(deduced_t, RefTypes::ref),
       VarDeclarationPtr("this", TypeRef(deduced_t, RefTypes::ref)),
       VarDeclarationPtr("RHS", TypeRef(deduced_t, RefTypes::ref, 2)), root,
-      detail::store, true);
+      detail::assignaddr, true);
 };
 
 struct Module {

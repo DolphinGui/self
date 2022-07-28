@@ -12,3 +12,4 @@ int64_t geterrno();
 int64_t selfflush();
 // This produces a random number 1 - 6 inclusive
 int64_t randomnumber();
+int64_t printnum(int64_t* number);
