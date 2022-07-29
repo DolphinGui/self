@@ -98,6 +98,7 @@ struct Pos {
   size_t col, line;
 };
 struct ExprBase;
+struct ExprVisitor;
 using ExprPtr = std::unique_ptr<ExprBase>;
 struct ExprBase {
   Pos pos;
@@ -111,6 +112,7 @@ struct ExprBase {
   virtual TokenView getName() const noexcept = 0;
   virtual bool isCompiletime() const noexcept { return false; }
   virtual ExprPtr clone() const = 0;
+  virtual void visit(const ExprVisitor &) const = 0;
 };
 
 template <typename T, typename... Args>
@@ -142,9 +144,23 @@ template <> struct fmt::formatter<self::ExprBase> : fmt::ostream_formatter {};
 namespace self {
 #endif
 
+namespace detail {
+template <class, class = void> struct canVisit_impl : std::false_type {};
+template <class T>
+struct canVisit_impl<
+    T, std::void_t<decltype(std::declval<ExprVisitor>()(std::declval<T>()))>>
+    : std::true_type {};
+template <typename T> inline constexpr bool canVisit = canVisit_impl<T>::value;
+}; // namespace detail
+
 template <typename Derive> struct ExprImpl : public ExprBase {
   ExprPtr clone() const override {
     return std::make_unique<Derive>(static_cast<const Derive &>(*this));
+  }
+  void visit(const ExprVisitor &guest) const override {
+    if constexpr (detail::canVisit<Derive>) {
+      guest(static_cast<const Derive &>(*this));
+    }
   }
 };
 

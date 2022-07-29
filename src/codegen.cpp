@@ -5,13 +5,17 @@
 #include <cstdint>
 #include <cstring>
 #include <cxxabi.h>
+#include <filesystem>
 #include <iostream>
 #include <iterator>
 #include <llvm/ADT/APInt.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
@@ -42,15 +46,18 @@ struct Generator {
   llvm::LLVMContext &context;
   std::unordered_map<std::string, llvm::AllocaInst *> var_map{};
   llvm::StructType *str_type;
+  std::vector<llvm::DIScope *> stack;
+  llvm::DIFile *file;
 
   Generator(llvm::LLVMContext &context) : context(context) {
     std::array<llvm::Type *, 2> members = {llvm::Type::getInt64Ty(context),
                                            llvm::PointerType::get(context, 0)};
     str_type = llvm::StructType::get(context, members);
+    stack.push_back(file);
   }
 
   void unpackArgs(self::ExprBase *e, auto unary) {
-    if (auto *args = dynamic_cast<self::arg_pack *>(e)) {
+    if (auto *args = dynamic_cast<self::ArgPack *>(e)) {
       for (auto &arg : args->members) {
         unary(*arg);
       }
@@ -103,8 +110,16 @@ struct Generator {
   llvm::Type *getType(const self::VarDeclaration &var, self::Context &c) {
     return getType(var.getDecltype(), c);
   }
+
+  static auto functionType() { llvm::SmallVector<int, 7> i; }
+
   void generateFun(const self::FunBase *fun, llvm::Module &module,
-                   self::Context &c) {
+                   self::Context &c, llvm::DIBuilder &di) {
+    llvm::DIScope *scope = file;
+    // auto subroutine = di.createFunction(
+    //     file, "name", "name", file, fun->pos.line,
+    //     llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
+
     std::vector<llvm::Type *> arg_types;
     arg_types.reserve(fun->argcount());
     forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
@@ -120,6 +135,7 @@ struct Generator {
       auto block = llvm::BasicBlock::Create(context, "entry", result);
       auto builder = llvm::IRBuilder<>(context);
       builder.SetInsertPoint(block);
+      // builder.SetCurrentDebugLocation(llvm::DILocation::get())
       for (auto &a : *fun->body) {
         dispatch(a.get(), builder, c);
       }
@@ -299,10 +315,8 @@ struct Generator {
           dynamic_cast<const self::BoolLit &>(*expr).value);
     } else if (type == typeid(self::VarDeclaration)) {
       auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
-      auto t = getType(var, c);
-      auto result = builder.CreateAlloca(t, 0, var.getDemangledName());
-      auto t2 = result->getAllocatedType();
-      auto t3 = result->getType();
+      auto result =
+          builder.CreateAlloca(getType(var, c), 0, var.getDemangledName());
       var_map.insert({var.getDemangledName(), result});
       return result;
     } else if (type == typeid(self::VarDeref)) {
@@ -336,10 +350,18 @@ struct Generator {
 namespace self {
 // must be returned by unique_ptr because module cannot be moved or copied
 std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
-                                      llvm::LLVMContext &llvm) {
+                                      llvm::LLVMContext &llvm,
+                                      std::filesystem::path file) {
   auto module =
       std::make_unique<llvm::Module>("todo: make module name meaningful", llvm);
   auto g = Generator(llvm);
+  auto di = llvm::DIBuilder(*module);
+  auto compile_unit = di.createCompileUnit(
+      llvm::dwarf::DW_LANG_C,
+      di.createFile(file.filename().c_str(), file.parent_path().c_str()),
+      "SELF compiler", false, "", 0);
+  g.file =
+      di.createFile(compile_unit->getFilename(), compile_unit->getDirectory());
   for (auto &expr : ast) { // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
@@ -348,7 +370,7 @@ std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
             dynamic_cast<self::FunBase *>(expr.get())) { // clang-format off
     #pragma clang diagnostic pop
       // clang-format on
-      g.generateFun(FunctionDef, *module, c);
+      g.generateFun(FunctionDef, *module, c, di);
     } else {
       throw std::runtime_error("unimplemented");
     }

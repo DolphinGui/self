@@ -56,7 +56,7 @@ int main() {
   auto f = std::string(file);
   auto AST = self::parseFile(f, c);
   std::cout << AST.ast;
-  auto IR = self::codegen(AST.ast, c, llvm);
+  auto IR = self::codegen(AST.ast, c, llvm, "../examples/test.me");
   std::error_code file_err;
   IR->print(llvm::outs(), nullptr);
   auto aout = llvm::raw_fd_ostream(path, file_err);

@@ -1,3 +1,9 @@
-fun add(a: i64, b: i64)->i64{
-  return 243
+extern "C" import "../stdlib/include/io.h\"
+
+fun main()->i64{
+  var a = 'hello world!\\n'
+  var b = ref(a)
+  selfprint(a)
+  selfprint(b)
+  return 0
 }

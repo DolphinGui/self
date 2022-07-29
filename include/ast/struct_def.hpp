@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ast/visitor.hpp"
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 

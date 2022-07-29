@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ast/visitor.hpp"
 #include "expression.hpp"
 #include "expression_tree.hpp"
 #include <algorithm>
@@ -24,8 +25,8 @@ struct Tuple : public ExprImpl<Tuple> {
   }
   TokenView getName() const noexcept override { return "tuple"; }
 };
-struct arg_pack : public Tuple {
-  arg_pack() = default;
-  arg_pack(Tuple &&other) : Tuple(std::move(other)) {}
+struct ArgPack : public Tuple {
+  ArgPack() = default;
+  ArgPack(Tuple &&other) : Tuple(std::move(other)) {}
 };
 } // namespace self

@@ -5,6 +5,7 @@
 #include <sstream>
 #include <vector>
 
+#include "ast/visitor.hpp"
 #include "ast/Index.hpp"
 #include "ast/expression.hpp"
 

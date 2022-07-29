@@ -381,7 +381,7 @@ struct GlobalParser {
             auto result = self::makeExpr<self::FunctionCall>(p,*fun);
             if (auto *tuple = dynamic_cast<self::Tuple *>(rhs->get())) {
               result->rhs =
-                  std::make_unique<self::arg_pack>(std::move(*tuple));
+                  std::make_unique<self::ArgPack>(std::move(*tuple));
             } else {
               result->rhs = std::move(*rhs);
             }

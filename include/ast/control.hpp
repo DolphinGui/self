@@ -1,4 +1,5 @@
 #pragma once
+#include "ast/visitor.hpp"
 #include "ast/expression.hpp"
 #include "ast/expression_tree.hpp"
 #include "builtins.hpp"
