@@ -112,7 +112,7 @@ struct ExprBase {
   virtual TokenView getName() const noexcept = 0;
   virtual bool isCompiletime() const noexcept { return false; }
   virtual ExprPtr clone() const = 0;
-  virtual void visit(const ExprVisitor &) const = 0;
+  virtual void visit(ExprVisitor &, void *data) const = 0;
 };
 
 template <typename T, typename... Args>
@@ -157,8 +157,8 @@ template <typename Derive> struct ExprImpl : public ExprBase {
   ExprPtr clone() const override {
     return std::make_unique<Derive>(static_cast<const Derive &>(*this));
   }
-  void visit(const ExprVisitor &guest) const override {
-    guest(static_cast<const Derive &>(*this));
+  void visit(ExprVisitor &guest, void *data) const override {
+    guest(static_cast<const Derive &>(*this), data);
   }
 };
 

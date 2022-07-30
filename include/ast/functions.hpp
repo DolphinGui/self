@@ -119,7 +119,9 @@ public:
   ExprPtr clone() const override {
     return std::make_unique<OperatorDef>(*this);
   }
-  void visit(const ExprVisitor &visitor) const override { visitor(*this); }
+  void visit(ExprVisitor &visitor, void *d) const override {
+    visitor(*this, d);
+  }
   constexpr static auto prefix = "__operator_";
   Token getDemangled() const override { return getDemangledName(); }
 };
@@ -152,7 +154,9 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   ExprPtr clone() const override {
     return std::make_unique<FunctionDef>(*this);
   }
-  void visit(const ExprVisitor &visitor) const override { visitor(*this); }
+  void visit(ExprVisitor &visitor, void *d) const override {
+    visitor(*this, d);
+  }
   std::size_t argcount() const noexcept override { return arguments.size(); }
   std::ostream &print(std::ostream &out) const override {
     out << "fun " << demangle(name) << "( ";

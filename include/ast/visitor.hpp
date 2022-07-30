@@ -18,24 +18,32 @@ struct FloatLit;
 struct StringLit;
 struct BoolLit;
 struct StructLit;
+struct FunctionCall;
 // struct Literal
 struct ExprVisitor {
-  virtual void operator()(const ExprBase &) const {};
-  virtual void operator()(const Ret &) const {}
-  virtual void operator()(const If &) const {}
-  virtual void operator()(const While &) const {}
-  virtual void operator()(const ExprTree &) const {}
-  virtual void operator()(const FunBase &) const {}
-  virtual void operator()(const StructDef &) const {}
-  virtual void operator()(const Tuple &) const {}
-  virtual void operator()(const UnevaluatedExpression &) const {}
-  virtual void operator()(const VarDeclaration &) const {}
-  virtual void operator()(const VarDeref &) const {}
-  virtual void operator()(const BuiltinTypeLit &) const {}
-  virtual void operator()(const IntLit &) const {}
-  virtual void operator()(const FloatLit &) const {}
-  virtual void operator()(const StringLit &) const {}
-  virtual void operator()(const BoolLit &) const {}
-  virtual void operator()(const StructLit &) const {}
+  // I hate having to do this
+  // but it was the only way to
+  // have a generalized visitor
+  // without having to involve
+  // the return values and other passed
+  // parameters intrusively.
+  virtual void operator()(const ExprBase &, void *){};
+  virtual void operator()(const Ret &, void *) {}
+  virtual void operator()(const If &, void *) {}
+  virtual void operator()(const While &, void *) {}
+  virtual void operator()(const ExprTree &, void *) {}
+  virtual void operator()(const FunBase &, void *) {}
+  virtual void operator()(const StructDef &, void *) {}
+  virtual void operator()(const Tuple &, void *) {}
+  virtual void operator()(const UnevaluatedExpression &, void *) {}
+  virtual void operator()(const VarDeclaration &, void *) {}
+  virtual void operator()(const VarDeref &, void *) {}
+  virtual void operator()(const BuiltinTypeLit &, void *) {}
+  virtual void operator()(const IntLit &, void *) {}
+  virtual void operator()(const FloatLit &, void *) {}
+  virtual void operator()(const StringLit &, void *) {}
+  virtual void operator()(const BoolLit &, void *) {}
+  virtual void operator()(const StructLit &, void *) {}
+  virtual void operator()(const FunctionCall &, void *) {}
 };
 } // namespace self

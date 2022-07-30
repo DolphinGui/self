@@ -40,25 +40,284 @@
 #include "ast/struct_def.hpp"
 #include "ast/tuple.hpp"
 #include "ast/variables.hpp"
+#include "ast/visitor.hpp"
 #include "builtins.hpp"
 
 namespace {
-struct Generator {
+using namespace self;
+// I swear this is proof c++
+// needs virtual function params
+struct Generator : ExprVisitor {
+private:
   llvm::LLVMContext &context;
+  self::Context &c;
   std::unordered_map<std::string, llvm::AllocaInst *> var_map{};
   llvm::StructType *str_type;
-  std::vector<llvm::DIScope *> stack;
-  llvm::DIFile *file;
+  // std::vector<llvm::DIScope *> stack;
+  // llvm::DIFile *file;
   llvm::Module &module;
+  struct Params {
+    const self::ExprBase *expr;
+    llvm::IRBuilder<> &builder;
+    bool return_val;
+    llvm::Value *ret = nullptr;
+  };
 
-  Generator(llvm::LLVMContext &context, llvm::Module &m)
-      : context(context), module(m) {
+public:
+  Generator(Context &c, llvm::LLVMContext &context, llvm::Module &m)
+      : context(context), c(c), module(m) {
     std::array<llvm::Type *, 2> members = {llvm::Type::getInt64Ty(context),
                                            llvm::PointerType::get(context, 0)};
     str_type = llvm::StructType::get(context, members);
-    stack.push_back(file);
+    // stack.push_back(file);
+  }
+  void generateFun(const self::FunBase &fun, self::Context &c,
+                   llvm::DIBuilder &di) {
+
+    std::vector<llvm::Type *> arg_types;
+    arg_types.reserve(fun.argcount());
+    forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
+      arg_types.push_back(getType(*a, c));
+    });
+
+    auto type =
+        llvm::FunctionType::get(getType(fun.return_type, c), arg_types, false);
+    auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
+                                         fun.getForeignName(), module);
+    result->setCallingConv(llvm::CallingConv::C);
+    if (fun.body_defined) {
+      auto block = llvm::BasicBlock::Create(context, "entry", result);
+      auto builder = llvm::IRBuilder<>(context);
+      builder.SetInsertPoint(block);
+      // builder.SetCurrentDebugLocation(llvm::DILocation::get())
+      for (auto &a : *fun.body) {
+        dispatch(a.get(), builder);
+      }
+    }
   }
 
+private:
+  llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
+                        bool return_val = true) {
+    auto passthrough = Params{expr, builder, return_val};
+    expr->visit(*this, &passthrough);
+    return passthrough.ret;
+  }
+
+  void operator()(const ExprBase &expr, void *data) override {
+    auto &type = typeid(expr);
+    std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
+              << '\n';
+    throw std::runtime_error("I dont know what type this is\n");
+  }
+
+  void operator()(const Ret &ret, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto &builder = d.builder;
+    if (ret.value) {
+      d.ret = builder.CreateRet(dispatch(ret.value.get(), builder));
+    } else {
+      d.ret = builder.CreateRetVoid();
+    }
+  }
+
+  void operator()(const FunctionCall &fun, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto &builder = d.builder;
+    switch (fun.getDefinition().internal) {
+    case self::detail::addi:
+      d.ret = builder.CreateAdd(dispatch(fun.lhs.get(), builder),
+                                dispatch(fun.rhs.get(), builder));
+      break;
+
+    case self::detail::store:
+      d.ret = builder.CreateStore(dispatch(fun.rhs.get(), builder),
+                                  dispatch(fun.lhs.get(), builder, false));
+      break;
+
+    case self::detail::subi:
+      d.ret = builder.CreateSub(dispatch(fun.lhs.get(), builder),
+                                dispatch(fun.rhs.get(), builder));
+      break;
+
+    case self::detail::muli:
+      d.ret = builder.CreateMul(dispatch(fun.lhs.get(), builder),
+                                dispatch(fun.rhs.get(), builder));
+      break;
+
+    case self::detail::divi:
+      d.ret = builder.CreateSDiv(dispatch(fun.lhs.get(), builder),
+                                 dispatch(fun.rhs.get(), builder));
+      break;
+
+    case self::detail::call:
+      d.ret = generateFunCall(fun, builder);
+      break;
+
+    case self::detail::assign:
+    case self::detail::cmpeq:
+      d.ret = builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder),
+                                   dispatch(fun.rhs.get(), builder));
+      break;
+
+    case self::detail::cmpneq:
+      d.ret = builder.CreateICmpNE(dispatch(fun.lhs.get(), builder),
+                                   dispatch(fun.rhs.get(), builder));
+      break;
+
+    case self::detail::addr:
+      d.ret = dispatch(fun.rhs.get(), builder, false);
+      break;
+
+    case self::detail::assignaddr:
+      d.ret = builder.CreateStore(dispatch(fun.rhs.get(), builder, false),
+                                  dispatch(fun.lhs.get(), builder, false));
+      break;
+
+    default:
+      throw std::runtime_error("This shouldn't happen");
+    }
+  }
+
+  void operator()(const IntLit &lit, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    d.ret = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context),
+                                   llvm::APInt(64, lit.value, true));
+  }
+
+  void operator()(const StringLit &str, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto arr_type =
+        llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
+    std::vector<llvm::Constant *> constants;
+    constants.reserve(str.value.size());
+    std::for_each(str.value.begin(), str.value.end(), [&](unsigned char c) {
+      constants.push_back(
+          llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), c));
+    });
+    auto size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context),
+                                       str.value.size());
+    auto str_constant = llvm::ConstantArray::get(arr_type, constants);
+    auto type =
+        llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
+    auto global = new llvm::GlobalVariable(
+        module, type, true, llvm::GlobalVariable::ExternalLinkage,
+        str_constant);
+    global->setAlignment(llvm::Align(1));
+    global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+    d.ret = llvm::ConstantStruct::get(str_type, {size, global});
+  }
+
+  void operator()(const BoolLit &lit, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    llvm::ConstantInt::getBool(llvm::Type::getInt1Ty(context), lit.value);
+  }
+
+  void operator()(const VarDeclaration &var, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto result =
+        d.builder.CreateAlloca(getType(var, c), 0, var.getDemangledName());
+    var_map.insert({var.getDemangledName(), result});
+    d.ret = result;
+  }
+
+  void operator()(const VarDeref &var, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto result = var_map.at(self::VarDeclaration::demangle(var.getName()));
+    if (var.definition.getDecltype().depth > 0) {
+      d.ret = d.builder.CreateLoad(llvm::PointerType::get(context, 0), result);
+      return;
+    }
+    if (!d.return_val) {
+      d.ret = result;
+    } else {
+      d.ret = d.builder.CreateLoad(result->getAllocatedType(), result);
+    }
+  }
+
+  void operator()(const If &if_e, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto &builder = d.builder;
+    auto function = builder.GetInsertBlock()->getParent();
+    auto then_block = llvm::BasicBlock::Create(context, "then", function);
+    auto cont_block = llvm::BasicBlock::Create(context, "continued");
+    llvm::BasicBlock *else_block;
+    if (if_e.else_block) {
+      else_block = llvm::BasicBlock::Create(context, "else");
+    } else {
+      else_block = cont_block;
+    }
+    builder.CreateCondBr(dispatch(if_e.condition.get(), builder), then_block,
+                         else_block);
+    builder.SetInsertPoint(then_block);
+    for (auto &e : *if_e.block) {
+      dispatch(e.get(), builder);
+    }
+    builder.CreateBr(cont_block);
+    function->getBasicBlockList().push_back(else_block);
+
+    if (else_block != cont_block) {
+      builder.SetInsertPoint(else_block);
+      for (auto &e : *if_e.else_block) {
+        dispatch(e.get(), builder);
+      }
+      builder.CreateBr(cont_block);
+    }
+
+    if (else_block != cont_block) {
+      function->getBasicBlockList().push_back(cont_block);
+    }
+    builder.SetInsertPoint(cont_block);
+  }
+
+  void operator()(const While &while_e, void *data) override {
+    auto &d = *static_cast<Params *>(data);
+    auto &builder = d.builder;
+    auto function = builder.GetInsertBlock()->getParent();
+    auto loop = llvm::BasicBlock::Create(context, "while loop", function);
+    auto cont_block = llvm::BasicBlock::Create(context, "after loop");
+    if (while_e.is_do) {
+      builder.CreateBr(loop);
+    } else {
+      builder.CreateCondBr(dispatch(while_e.condition.get(), builder), loop,
+                           cont_block);
+    }
+    builder.SetInsertPoint(loop);
+    for (auto &e : *while_e.block) {
+      dispatch(e.get(), builder);
+    }
+    builder.CreateCondBr(dispatch(while_e.condition.get(), builder), loop,
+                         cont_block);
+    function->getBasicBlockList().push_back(cont_block);
+    builder.SetInsertPoint(cont_block);
+    throw std::runtime_error("unimplemented right now");
+  }
+
+  llvm::Value *generateFunCall(const self::FunctionCall &base,
+                               llvm::IRBuilder<> &builder) {
+    llvm::FunctionType *type;
+    {
+      std::vector<llvm::Type *> arg_types;
+      arg_types.reserve(base.definition.argcount());
+      const auto arg_push =
+          [&](const std::unique_ptr<self::VarDeclaration> &a) {
+            arg_types.push_back(getType(*a, c));
+          };
+      forEachArg(base.definition, arg_push);
+      type = llvm::FunctionType::get(getType(base.definition.return_type, c),
+                                     arg_types, false);
+    }
+    auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
+    auto *val = table.lookup(base.definition.getForeignName());
+    auto callee = llvm::FunctionCallee(type, val);
+    std::vector<llvm::Value *> args;
+    args.reserve(base.definition.argcount());
+    forEachArg(base, [&](const self::ExprBase &e) {
+      args.push_back(
+          dispatch(&e, builder, e.getType().is_ref == self::RefTypes::value));
+    });
+    return builder.CreateCall(callee, args);
+  }
   void unpackArgs(self::ExprBase *e, auto unary) {
     if (auto *args = dynamic_cast<self::ArgPack *>(e)) {
       for (auto &arg : args->members) {
@@ -87,9 +346,6 @@ struct Generator {
       unary(op.rhs);
     }
   }
-
-  // honestly not great but I don't think
-  // there's a better way to do this
   llvm::Type *getType(self::TypeRef t, self::Context &c) {
     if (t.is_ref == self::RefTypes::ref) {
       return llvm::PointerType::get(context, 0);
@@ -116,275 +372,7 @@ struct Generator {
   llvm::Type *getType(const self::VarDeclaration &var, self::Context &c) {
     return getType(var.getDecltype(), c);
   }
-
-  unsigned int getDwarf(self::TypeRef t, self::Context &c) {
-    if (t.is_ref == self::RefTypes::ref) {
-      return llvm::dwarf::DW_ATE_address;
-    }
-    if (t == c.i64_t) {
-      return llvm::dwarf::DW_ATE_signed;
-    }
-    if (t == c.u64_t) {
-      return llvm::dwarf::DW_ATE_unsigned;
-    }
-    if (t == c.void_t) {
-      // todo maybe figure something else out???
-      return 0;
-    }
-    if (t == c.bool_t) {
-      return llvm::dwarf::DW_ATE_boolean;
-    }
-    if (t == c.str_t) {
-      return llvm::dwarf::DW_ATE_UTF;
-    }
-
-    throw std::runtime_error("non ints not implemented right now");
-  }
-  unsigned int getDwarf(const self::VarDeclaration &var, self::Context &c) {
-    return getDwarf(var.getDecltype(), c);
-  }
-
-  auto createFunDebugType(const self::FunBase &fun, self::Context &c,
-                          llvm::DIBuilder &di) {
-    llvm::SmallVector<llvm::Metadata *> arg_types;
-    forEachArg(fun, [&, this](const std::unique_ptr<self::VarDeclaration> &a) {
-      arg_types.push_back(di.createBasicType(
-          a->getName(),
-          module.getDataLayout().getTypeSizeInBits(getType(*a, c)),
-          getDwarf(*a, c)));
-    });
-    return di.createSubroutineType(di.getOrCreateTypeArray(arg_types));
-  }
-
-  void generateFun(const self::FunBase &fun, self::Context &c,
-                   llvm::DIBuilder &di) {
-    llvm::DIScope *scope = file;
-
-    std::vector<llvm::Type *> arg_types;
-    arg_types.reserve(fun.argcount());
-    forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
-      arg_types.push_back(getType(*a, c));
-    });
-
-    auto type =
-        llvm::FunctionType::get(getType(fun.return_type, c), arg_types, false);
-    auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
-                                         fun.getForeignName(), module);
-    result->setCallingConv(llvm::CallingConv::C);
-    if (fun.body_defined) {
-      auto block = llvm::BasicBlock::Create(context, "entry", result);
-      auto builder = llvm::IRBuilder<>(context);
-      builder.SetInsertPoint(block);
-      // builder.SetCurrentDebugLocation(llvm::DILocation::get())
-      for (auto &a : *fun.body) {
-        dispatch(a.get(), builder, c);
-      }
-    }
-  }
-  llvm::Value *generateFunCall(const self::FunctionCall &base,
-                               llvm::IRBuilder<> &builder, self::Context &c) {
-    llvm::FunctionType *type;
-    {
-      std::vector<llvm::Type *> arg_types;
-      arg_types.reserve(base.definition.argcount());
-      const auto arg_push =
-          [&](const std::unique_ptr<self::VarDeclaration> &a) {
-            arg_types.push_back(getType(*a, c));
-          };
-      forEachArg(base.definition, arg_push);
-      type = llvm::FunctionType::get(getType(base.definition.return_type, c),
-                                     arg_types, false);
-    }
-    auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
-    auto *val = table.lookup(base.definition.getForeignName());
-    auto callee = llvm::FunctionCallee(type, val);
-    std::vector<llvm::Value *> args;
-    args.reserve(base.definition.argcount());
-    forEachArg(base, [&](const self::ExprBase &e) {
-      args.push_back(dispatch(&e, builder, c,
-                              e.getType().is_ref == self::RefTypes::value));
-    });
-    return builder.CreateCall(callee, args);
-  }
-  llvm::Value *generateCall(const self::FunctionCall &fun,
-                            llvm::IRBuilder<> &builder, self::Context &c) {
-    switch (fun.getDefinition().internal) {
-    case self::detail::addi:
-      return builder.CreateAdd(dispatch(fun.lhs.get(), builder, c),
-                               dispatch(fun.rhs.get(), builder, c));
-
-    case self::detail::store:
-      return builder.CreateStore(dispatch(fun.rhs.get(), builder, c),
-                                 dispatch(fun.lhs.get(), builder, c, false));
-
-    case self::detail::subi:
-      return builder.CreateSub(dispatch(fun.lhs.get(), builder, c),
-                               dispatch(fun.rhs.get(), builder, c));
-
-    case self::detail::muli:
-      return builder.CreateMul(dispatch(fun.lhs.get(), builder, c),
-                               dispatch(fun.rhs.get(), builder, c));
-
-    case self::detail::divi:
-      return builder.CreateSDiv(dispatch(fun.lhs.get(), builder, c),
-                                dispatch(fun.rhs.get(), builder, c));
-
-    case self::detail::call:
-      return generateFunCall(fun, builder, c);
-
-    case self::detail::assign:
-    case self::detail::cmpeq:
-      return builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder, c),
-                                  dispatch(fun.rhs.get(), builder, c));
-
-    case self::detail::cmpneq:
-      return builder.CreateICmpNE(dispatch(fun.lhs.get(), builder, c),
-                                  dispatch(fun.rhs.get(), builder, c));
-
-    case self::detail::addr: {
-      return dispatch(fun.rhs.get(), builder, c, false);
-      // return builder.CreateLoad(llvm::PointerType::get(context, 0), ptr);
-    }
-    case self::detail::assignaddr:
-      return builder.CreateStore(dispatch(fun.rhs.get(), builder, c, false),
-                                 dispatch(fun.lhs.get(), builder, c, false));
-    default:
-      throw std::runtime_error("This shouldn't happen");
-    }
-    return nullptr;
-  }
-
-  llvm::Value *createString(const self::StringLit &str, llvm::Module &m) {
-    auto arr_type =
-        llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
-    std::vector<llvm::Constant *> constants;
-    constants.reserve(str.value.size());
-    std::for_each(str.value.begin(), str.value.end(), [&](unsigned char c) {
-      constants.push_back(
-          llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), c));
-    });
-    auto size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context),
-                                       str.value.size());
-    auto str_constant = llvm::ConstantArray::get(arr_type, constants);
-    auto type =
-        llvm::ArrayType::get(llvm::Type::getInt8Ty(context), str.value.size());
-    auto global = new llvm::GlobalVariable(
-        m, type, true, llvm::GlobalVariable::ExternalLinkage, str_constant);
-    global->setAlignment(llvm::Align(1));
-    global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
-    return llvm::ConstantStruct::get(str_type, {size, global});
-  }
-
-  void createWhile(const self::While *while_e, llvm::IRBuilder<> &builder,
-                   self::Context &c) {
-    auto function = builder.GetInsertBlock()->getParent();
-    auto loop = llvm::BasicBlock::Create(context, "while loop", function);
-    auto cont_block = llvm::BasicBlock::Create(context, "after loop");
-    if (while_e->is_do) {
-      builder.CreateBr(loop);
-    } else {
-      builder.CreateCondBr(dispatch(while_e->condition.get(), builder, c), loop,
-                           cont_block);
-    }
-    builder.SetInsertPoint(loop);
-    for (auto &e : *while_e->block) {
-      dispatch(e.get(), builder, c);
-    }
-    builder.CreateCondBr(dispatch(while_e->condition.get(), builder, c), loop,
-                         cont_block);
-    function->getBasicBlockList().push_back(cont_block);
-    builder.SetInsertPoint(cont_block);
-  }
-
-  void createIf(const self::If *if_e, llvm::IRBuilder<> &builder,
-                self::Context &c) {
-    auto function = builder.GetInsertBlock()->getParent();
-    auto then_block = llvm::BasicBlock::Create(context, "then", function);
-    auto cont_block = llvm::BasicBlock::Create(context, "continued");
-    llvm::BasicBlock *else_block;
-    if (if_e->else_block) {
-      else_block = llvm::BasicBlock::Create(context, "else");
-    } else {
-      else_block = cont_block;
-    }
-    builder.CreateCondBr(dispatch(if_e->condition.get(), builder, c),
-                         then_block, else_block);
-    builder.SetInsertPoint(then_block);
-    for (auto &e : *if_e->block) {
-      dispatch(e.get(), builder, c);
-    }
-    builder.CreateBr(cont_block);
-    function->getBasicBlockList().push_back(else_block);
-
-    if (else_block != cont_block) {
-      builder.SetInsertPoint(else_block);
-      for (auto &e : *if_e->else_block) {
-        dispatch(e.get(), builder, c);
-      }
-      builder.CreateBr(cont_block);
-    }
-
-    if (else_block != cont_block) {
-      function->getBasicBlockList().push_back(cont_block);
-    }
-    builder.SetInsertPoint(cont_block);
-  }
-
-  llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
-                        self::Context &c, bool return_val = true) {
-    if (auto *fun = dynamic_cast<const self::FunctionCall *>(expr)) {
-      return generateCall(*fun, builder, c);
-    } else if (auto &type = typeid(*expr); type == typeid(self::Ret)) {
-      auto &ret = dynamic_cast<const self::Ret &>(*expr);
-      if (ret.value) {
-        return builder.CreateRet(dispatch(ret.value.get(), builder, c));
-      } else {
-        return builder.CreateRetVoid();
-      }
-    } else if (type == typeid(self::IntLit)) {
-      return llvm::ConstantInt::get(
-          llvm::Type::getInt64Ty(context),
-          llvm::APInt(64, dynamic_cast<const self::IntLit &>(*expr).value,
-                      true));
-    } else if (type == typeid(self::StringLit)) {
-      auto &str = dynamic_cast<const self::StringLit &>(*expr);
-      return createString(str, *builder.GetInsertBlock()->getModule());
-    } else if (type == typeid(self::BoolLit)) {
-      return llvm::ConstantInt::getBool(
-          llvm::Type::getInt1Ty(context),
-          dynamic_cast<const self::BoolLit &>(*expr).value);
-    } else if (type == typeid(self::VarDeclaration)) {
-      auto &var = dynamic_cast<const self::VarDeclaration &>(*expr);
-      auto result =
-          builder.CreateAlloca(getType(var, c), 0, var.getDemangledName());
-      var_map.insert({var.getDemangledName(), result});
-      return result;
-    } else if (type == typeid(self::VarDeref)) {
-      auto var = dynamic_cast<const self::VarDeref &>(*expr);
-      auto result = var_map.at(self::VarDeclaration::demangle(var.getName()));
-      if (var.definition.getDecltype().depth > 0) {
-        auto load =
-            builder.CreateLoad(llvm::PointerType::get(context, 0), result);
-        return load;
-      }
-      if (!return_val)
-        return result;
-      else
-        return builder.CreateLoad(result->getAllocatedType(), result);
-    } else if (type == typeid(self::If)) {
-      createIf(dynamic_cast<const self::If *>(expr), builder, c);
-      return nullptr;
-    } else if (type == typeid(self::While)) {
-      createWhile(dynamic_cast<const self::While *>(expr), builder, c);
-      return nullptr;
-    } else {
-      std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
-                << '\n';
-      throw std::runtime_error("I dont know what type this is\n");
-    }
-  }
 };
-
 } // namespace
 
 namespace self {
@@ -394,14 +382,15 @@ std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
                                       std::filesystem::path file) {
   auto module =
       std::make_unique<llvm::Module>("todo: make module name meaningful", llvm);
-  auto g = Generator(llvm, *module);
+  auto g = Generator(c, llvm, *module);
   auto di = llvm::DIBuilder(*module);
-  auto compile_unit = di.createCompileUnit(
-      llvm::dwarf::DW_LANG_C,
-      di.createFile(file.filename().c_str(), file.parent_path().c_str()),
-      "SELF compiler", false, "", 0);
-  g.file =
-      di.createFile(compile_unit->getFilename(), compile_unit->getDirectory());
+  // auto compile_unit = di.createCompileUnit(
+  //     llvm::dwarf::DW_LANG_C,
+  //     di.createFile(file.filename().c_str(), file.parent_path().c_str()),
+  //     "SELF compiler", false, "", 0);
+  // g.file =
+  //     di.createFile(compile_unit->getFilename(),
+  //     compile_unit->getDirectory());
   for (auto &expr : ast) { // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
