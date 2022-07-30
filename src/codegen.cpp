@@ -10,6 +10,7 @@
 #include <iterator>
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/Constant.h>
@@ -48,8 +49,10 @@ struct Generator {
   llvm::StructType *str_type;
   std::vector<llvm::DIScope *> stack;
   llvm::DIFile *file;
+  llvm::Module &module;
 
-  Generator(llvm::LLVMContext &context) : context(context) {
+  Generator(llvm::LLVMContext &context, llvm::Module &m)
+      : context(context), module(m) {
     std::array<llvm::Type *, 2> members = {llvm::Type::getInt64Ty(context),
                                            llvm::PointerType::get(context, 0)};
     str_type = llvm::StructType::get(context, members);
@@ -75,16 +78,18 @@ struct Generator {
       throw std::runtime_error("unimplemented");
     }
   }
-  void forEachArg(const self::FunBase *def, auto unary) {
-    if (auto *fun = dynamic_cast<const self::FunctionDef *>(def)) {
+  void forEachArg(const self::FunBase &def, auto unary) {
+    if (auto *fun = dynamic_cast<const self::FunctionDef *>(&def)) {
       std::for_each(fun->arguments.begin(), fun->arguments.end(), unary);
     } else {
-      auto &op = dynamic_cast<const self::OperatorDef &>(*def);
+      auto &op = dynamic_cast<const self::OperatorDef &>(def);
       unary(op.lhs);
       unary(op.rhs);
     }
   }
 
+  // honestly not great but I don't think
+  // there's a better way to do this
   llvm::Type *getType(self::TypeRef t, self::Context &c) {
     if (t.is_ref == self::RefTypes::ref) {
       return llvm::PointerType::get(context, 0);
@@ -107,36 +112,71 @@ struct Generator {
 
     throw std::runtime_error("non ints not implemented right now");
   }
+
   llvm::Type *getType(const self::VarDeclaration &var, self::Context &c) {
     return getType(var.getDecltype(), c);
   }
 
-  static auto functionType() { llvm::SmallVector<int, 7> i; }
+  unsigned int getDwarf(self::TypeRef t, self::Context &c) {
+    if (t.is_ref == self::RefTypes::ref) {
+      return llvm::dwarf::DW_ATE_address;
+    }
+    if (t == c.i64_t) {
+      return llvm::dwarf::DW_ATE_signed;
+    }
+    if (t == c.u64_t) {
+      return llvm::dwarf::DW_ATE_unsigned;
+    }
+    if (t == c.void_t) {
+      // todo maybe figure something else out???
+      return 0;
+    }
+    if (t == c.bool_t) {
+      return llvm::dwarf::DW_ATE_boolean;
+    }
+    if (t == c.str_t) {
+      return llvm::dwarf::DW_ATE_UTF;
+    }
 
-  void generateFun(const self::FunBase *fun, llvm::Module &module,
-                   self::Context &c, llvm::DIBuilder &di) {
+    throw std::runtime_error("non ints not implemented right now");
+  }
+  unsigned int getDwarf(const self::VarDeclaration &var, self::Context &c) {
+    return getDwarf(var.getDecltype(), c);
+  }
+
+  auto createFunDebugType(const self::FunBase &fun, self::Context &c,
+                          llvm::DIBuilder &di) {
+    llvm::SmallVector<llvm::Metadata *> arg_types;
+    forEachArg(fun, [&, this](const std::unique_ptr<self::VarDeclaration> &a) {
+      arg_types.push_back(di.createBasicType(
+          a->getName(),
+          module.getDataLayout().getTypeSizeInBits(getType(*a, c)),
+          getDwarf(*a, c)));
+    });
+    return di.createSubroutineType(di.getOrCreateTypeArray(arg_types));
+  }
+
+  void generateFun(const self::FunBase &fun, self::Context &c,
+                   llvm::DIBuilder &di) {
     llvm::DIScope *scope = file;
-    // auto subroutine = di.createFunction(
-    //     file, "name", "name", file, fun->pos.line,
-    //     llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
 
     std::vector<llvm::Type *> arg_types;
-    arg_types.reserve(fun->argcount());
+    arg_types.reserve(fun.argcount());
     forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
       arg_types.push_back(getType(*a, c));
     });
 
     auto type =
-        llvm::FunctionType::get(getType(fun->return_type, c), arg_types, false);
+        llvm::FunctionType::get(getType(fun.return_type, c), arg_types, false);
     auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
-                                         fun->getForeignName(), module);
+                                         fun.getForeignName(), module);
     result->setCallingConv(llvm::CallingConv::C);
-    if (fun->body_defined) {
+    if (fun.body_defined) {
       auto block = llvm::BasicBlock::Create(context, "entry", result);
       auto builder = llvm::IRBuilder<>(context);
       builder.SetInsertPoint(block);
       // builder.SetCurrentDebugLocation(llvm::DILocation::get())
-      for (auto &a : *fun->body) {
+      for (auto &a : *fun.body) {
         dispatch(a.get(), builder, c);
       }
     }
@@ -151,7 +191,7 @@ struct Generator {
           [&](const std::unique_ptr<self::VarDeclaration> &a) {
             arg_types.push_back(getType(*a, c));
           };
-      forEachArg(&base.definition, arg_push);
+      forEachArg(base.definition, arg_push);
       type = llvm::FunctionType::get(getType(base.definition.return_type, c),
                                      arg_types, false);
     }
@@ -354,7 +394,7 @@ std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
                                       std::filesystem::path file) {
   auto module =
       std::make_unique<llvm::Module>("todo: make module name meaningful", llvm);
-  auto g = Generator(llvm);
+  auto g = Generator(llvm, *module);
   auto di = llvm::DIBuilder(*module);
   auto compile_unit = di.createCompileUnit(
       llvm::dwarf::DW_LANG_C,
@@ -370,7 +410,7 @@ std::unique_ptr<llvm::Module> codegen(const self::ExprTree &ast, Context &c,
             dynamic_cast<self::FunBase *>(expr.get())) { // clang-format off
     #pragma clang diagnostic pop
       // clang-format on
-      g.generateFun(FunctionDef, *module, c, di);
+      g.generateFun(*FunctionDef, c, di);
     } else {
       throw std::runtime_error("unimplemented");
     }

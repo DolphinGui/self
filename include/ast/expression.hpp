@@ -158,9 +158,7 @@ template <typename Derive> struct ExprImpl : public ExprBase {
     return std::make_unique<Derive>(static_cast<const Derive &>(*this));
   }
   void visit(const ExprVisitor &guest) const override {
-    if constexpr (detail::canVisit<Derive>) {
-      guest(static_cast<const Derive &>(*this));
-    }
+    guest(static_cast<const Derive &>(*this));
   }
 };
 

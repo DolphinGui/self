@@ -42,7 +42,7 @@ struct FunBase : public ExprBase {
   detail::BuiltinInstruction internal;
   bool member = false;
   bool body_defined = false;
-  virtual Token printDemangled() const = 0;
+  virtual Token getDemangled() const = 0;
 
 protected:
   FunBase(TokenView name, Index &parent, bool member = false)
@@ -121,7 +121,7 @@ public:
   }
   void visit(const ExprVisitor &visitor) const override { visitor(*this); }
   constexpr static auto prefix = "__operator_";
-  Token printDemangled() const override { return getDemangledName(); }
+  Token getDemangled() const override { return getDemangledName(); }
 };
 
 struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
@@ -169,7 +169,7 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
     return out;
   }
   constexpr static auto prefix = "__function_";
-  Token printDemangled() const override { return getDemangledName(); }
+  Token getDemangled() const override { return getDemangledName(); }
 };
 
 class FunctionCall : public ExprImpl<FunctionCall> {
@@ -186,7 +186,7 @@ public:
   inline std::ostream &print(std::ostream &out) const override {
     if (lhs)
       out << *lhs << ' ';
-    out << definition.printDemangled() << ' ';
+    out << definition.getDemangled() << ' ';
     if (rhs)
       out << *rhs;
     return out;
