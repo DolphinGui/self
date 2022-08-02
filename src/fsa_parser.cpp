@@ -100,7 +100,7 @@ constexpr auto notReserved = [](auto t) {
 };
 
 struct TokenIt {
-  TokenIt(self::LexedFileRef &where) : where(where) {}
+  TokenIt(self::LexedFileRef &where) : where(where), col(1), line(1) {}
   self::LexedFileRef &where;
   size_t pos = 0;
   size_t col = 0, line = 0;
@@ -112,7 +112,7 @@ struct TokenIt {
     }
     ++pos;
     if (!end() && self::reserved::isEndl(**this)) {
-      col = 0;
+      col = 1;
       ++line;
     } else {
       ++col;

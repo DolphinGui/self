@@ -18,7 +18,7 @@ struct FloatLit;
 struct StringLit;
 struct BoolLit;
 struct StructLit;
-struct FunctionCall;
+class FunctionCall;
 // struct Literal
 struct ExprVisitor {
   // I hate having to do this

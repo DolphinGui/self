@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
         fmt::print("Errors exist in file {}: {}", p, module.errs);
         std::exit(1);
       }
-      auto llvmIR = self::codegen(module.ast, c, llvm, p);
+      auto [llvmIR, di] = self::codegen(module.ast, c, llvm, p);
       std::string path;
       tmps.push_back(self::createtmp(path));
       self::compile(*llvmIR, *tmps.back());

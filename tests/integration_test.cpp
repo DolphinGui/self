@@ -2,11 +2,16 @@
 #include "builtins.hpp"
 #include "lexer.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fmt/core.h>
+#include <fstream>
+#include <ios>
 #include <iostream>
+#include <iterator>
+#include <limits>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
@@ -14,17 +19,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
-// for some reason raw string does not include
-// newline. In a real file the semicolons are
-// not necessary.
-constexpr auto file = "extern \"C\" import \"../stdlib/include/io.h\"\n"
-                      "fun main()->i64{\n"
-                      "  var a = 'hello world!\\n'\n"
-                      "  var b = ref(a)\n"
-                      "  selfprint(a)\n"
-                      "  selfprint(b)\n"
-                      "  return 0\n"
-                      "}";
 constexpr auto path = "a.o";
 constexpr auto output_name = "a.out";
 // this is not crossplatform in the slightest.
@@ -48,15 +42,27 @@ auto get_stdlib() {
   throw std::runtime_error("libselfstd.a not found");
 }
 
+std::string readFile() {
+  std::string contents;
+  auto file = std::ifstream("../examples/test.me", std::ios::binary);
+  file.ignore(std::numeric_limits<std::streamsize>::max());
+  auto size = file.gcount();
+  contents.reserve(size);
+  file.seekg(std::ios::beg);
+  std::copy_n(std::istreambuf_iterator(file), size,
+              std::back_inserter(contents));
+  return contents;
+}
+
 int main() {
   self::Context c;
   llvm::LLVMContext llvm;
   llvm.enableOpaquePointers();
   auto stdlib = get_stdlib();
-  auto f = std::string(file);
+  auto f = readFile();
   auto AST = self::parseFile(f, c);
   std::cout << AST.ast;
-  auto IR = self::codegen(AST.ast, c, llvm, "../examples/test.me");
+  auto [IR, di] = self::codegen(AST.ast, c, llvm, "../examples/test.me");
   std::error_code file_err;
   IR->print(llvm::outs(), nullptr);
   auto aout = llvm::raw_fd_ostream(path, file_err);

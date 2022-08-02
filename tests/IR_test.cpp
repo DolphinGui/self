@@ -1,9 +1,13 @@
+#include <cstdlib>
+#include <llvm/IR/DIBuilder.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/CodeGen.h>
 #include <llvm/Support/Host.h>
@@ -46,26 +50,37 @@ TargetMachine *config_module(Module &module) {
 }
 
 int main() {
-  LLVMContext c;
-  c.enableOpaquePointers();
-  auto m = Module("this is a module name I guess", c);
-  auto int_t = Type::getInt64Ty(c);
-  auto ptr_t = PointerType::get(c, 0);
-  auto printer = Function::Create(FunctionType::get(int_t, {ptr_t}, false),
-                                  GlobalValue::ExternalLinkage, "printnum", m);
+  LLVMContext llvm;
+  llvm.enableOpaquePointers();
+  auto m = Module("this is a module name I guess", llvm);
+  auto di = DIBuilder(m, false);
+  auto file = di.createFile("fake.me", "../examples");
+  auto compile_unit = di.createCompileUnit(dwarf::DW_LANG_C, file,
+                                           "IR generation test", false, "", 0);
+  auto int_t = Type::getInt64Ty(llvm);
+  auto ptr_t = PointerType::get(llvm, 0);
+  // auto printer = Function::Create(FunctionType::get(int_t, {ptr_t}, false),
+  //                                 GlobalValue::ExternalLinkage, "printnum",
+  //                                 m);
   auto main = Function::Create(FunctionType::get(int_t, false),
                                GlobalValue::ExternalLinkage, "main", m);
-  auto block = BasicBlock::Create(c, "entry", main);
-  auto builder = IRBuilder<>(c);
+  main->setDSOLocal(true);
+  auto main_debug_t = di.createSubroutineType({});
+  auto main_debug =
+      di.createFunction(compile_unit, "main", "main", file, 1, main_debug_t, 1,
+                        DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
+  main->setSubprogram(main_debug);
+  auto block = BasicBlock::Create(llvm, "entry", main);
+  auto builder = IRBuilder<>(llvm);
   builder.SetInsertPoint(block);
   auto a = builder.CreateAlloca(int_t);
   auto int_lit = ConstantInt::get(int_t, APInt(64, 123, true));
   builder.CreateStore(int_lit, a);
-  auto b = builder.CreateAlloca(PointerType::get(c, 0));
+  auto b = builder.CreateAlloca(PointerType::get(llvm, 0));
   builder.CreateStore(a, b);
-  builder.CreateCall(printer, a);
+  // builder.CreateCall(printer, a);
   auto loadb = builder.CreateLoad(ptr_t, b);
-  builder.CreateCall(printer, loadb);
+  // builder.CreateCall(printer, loadb);
   builder.CreateRet(int_lit);
   m.print(outs(), nullptr);
   legacy::PassManager pass;
@@ -76,6 +91,10 @@ int main() {
                                   CodeGenFileType::CGFT_ObjectFile, false)) {
     errs() << "TargetMachine can't emit a file of this type\n";
     throw std::runtime_error("");
+  }
+  di.finalize();
+  if (llvm::verifyModule(m, &llvm::errs())) {
+    std::exit(-1);
   }
 
   pass.add(createInstructionCombiningPass());
