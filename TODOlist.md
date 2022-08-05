@@ -1,3 +1,11 @@
+* Basic features
+  * Structs
+    * Constructors
+    * member access
+    * member functions
+    * member operators
+    * destructors
+    * move semantics?
 * control flow
   * switch?
 * metaprogramming
@@ -13,3 +21,5 @@
   * pointers and references
   * const?
   * compiletime/runtime
+* Code style
+  * use optional monads to reduce pyramids of doom

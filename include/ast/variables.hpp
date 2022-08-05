@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ast/visitor.hpp"
 #include "ast/expression.hpp"
+#include "ast/visitor.hpp"
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -19,7 +19,7 @@ public:
   VarDeclaration(TokenView name) : name(mangle(name)), type_ref{nullptr} {}
   VarDeclaration(TokenView name, TypeRef type)
       : name(mangle(name)), type_ref{&type.ptr, type.is_ref} {}
-
+      
   inline std::ostream &print(std::ostream &out) const override {
     if (type_ref.ptr)
       return out << "var " << demangle(name) << ": " << type_ref.dump();
@@ -48,10 +48,10 @@ std::unique_ptr<VarDeclaration> VarDeclarationPtr(auto &&...args) {
 }
 
 struct VarDeref : public ExprImpl<VarDeref> {
-  const VarDeclaration &definition;
-  std::string name;
+  VarDeclaration &definition;
+  std::string_view name;
 
-  VarDeref(const VarDeclaration &definition)
+  VarDeref(VarDeclaration &definition)
       : definition(definition), name(definition.getName()) {}
 
   inline std::ostream &print(std::ostream &out) const override {

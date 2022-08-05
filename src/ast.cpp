@@ -18,8 +18,6 @@ std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&e, Index &local) {
     case detail::call:
       // todo implement compiletime function evaluation later
       return {std::move(f), Unresolved};
-    case detail::store:
-    case detail::assign:
     case detail::addi:
     case detail::subi:
     case detail::muli:
@@ -28,14 +26,15 @@ std::pair<ExprPtr, FullyResolved> foldExpr(ExprPtr &&e, Index &local) {
     default:
       // not sure if there's a point to folding constant arithmetic
       return {std::move(f), Unresolved};
+    case detail::assign:
+    case detail::store:
+      if (auto *var = dynamic_cast<VarDeclaration *>(f->lhs.get())) {
+        var->value = f->rhs.get();
+      } else if (auto *var = dynamic_cast<VarDeref *>(f->lhs.get())) {
+        var->definition.value = f->rhs.get();
+      }
+      return {std::move(f), Unresolved};
     }
-  } else if (auto *deref = dynamic_cast<VarDeref *>(e.get())) {
-    auto result = local.find(deref->getName());
-    auto var = dynamic_cast<const VarDeclaration *>(&result->get());
-    if (dynamic_cast<Literal *>(var->value)) {
-      return {e->clone(), Resolved};
-    }
-    return {var->value->clone(), Unresolved};
   } else {
     return {std::move(e), Unresolved};
   }

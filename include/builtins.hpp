@@ -64,6 +64,7 @@ struct Context {
         .second;
   }
   Context(const Context &) = delete;
+  Context(Context &&) = delete;
   const TypeType type_t = TypeType("type");
   const TypeType deduced_t = TypeType("deduced");
   const TypeType i64_t = TypeType("i64");

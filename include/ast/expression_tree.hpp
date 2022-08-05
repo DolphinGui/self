@@ -5,26 +5,29 @@
 #include <sstream>
 #include <vector>
 
-#include "ast/visitor.hpp"
 #include "ast/Index.hpp"
 #include "ast/expression.hpp"
+#include "ast/visitor.hpp"
 
 namespace self {
 struct ExprTree : public ExprImpl<ExprTree>, public ExpressionList {
   virtual inline std::ostream &print(std::ostream &out) const override {
     out << "Tree contents:\n";
     for (const auto &e : *this) {
-      out << "  " << *e << '\n';
+      if (e) {
+        out << "  " << *e << '\n';
+      }
     }
     return out;
   }
 
-  // for debugging
+#ifndef NDEBUG
   std::string dump() {
     std::stringstream result;
     print(result);
     return result.str();
   }
+#endif
 
   virtual TokenView getName() const noexcept override {
     return "expression tree";

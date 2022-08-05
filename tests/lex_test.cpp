@@ -25,7 +25,9 @@ constexpr auto var_decl = "var a: i64";
 constexpr auto expr = "var a = 1 + ((2 - 5 + 6) / 3) * 2";
 constexpr auto function_def = "fun main()->i64{return 0;}";
 constexpr auto foward_decl = "fun function()->i64;";
-constexpr auto struct_test = "var b = i64;var a = struct{var a: i64;}";
+constexpr auto struct_test = "var a = struct{var a: i64;var b: str;};"
+                             "var b = a(123, 'string');"
+                             "var c = b.a;var d = b.b";
 constexpr auto nesting = "var a = struct{fun a()->i64{return 22;};var b = 2;}";
 constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
                              "fun main()->i64{"
@@ -34,12 +36,17 @@ constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
 int main() {
   uint count = 0;
   self::Context c;
-  for (auto file : {reference, while_inline, do_while, if_else_block, if_else,
-                    elif, nesting, boolean, struct_test, import_test,
-                    function_def, expr, deref, var_decl, foward_decl}) {
+  for (auto file : {
+           struct_test,
+           // nesting, reference, while_inline, do_while,
+           //                   if_else_block, if_else, elif, boolean,
+           //                   import_test, function_def, expr, deref,
+           //                   var_decl, foward_decl
+       }) {
     fmt::print("Test {}:\n", count++);
     auto f = std::string(file);
     auto results = self::parseFile(f, c);
+    auto a = results.ast.dump();
     for (auto &ex : results.ast) {
       fmt::print("{}", *ex);
     }

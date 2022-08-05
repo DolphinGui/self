@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <bits/iterator_concepts.h>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -11,12 +10,16 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include "ast/Index.hpp"
@@ -29,8 +32,7 @@
 #include "ast/tuple.hpp"
 #include "ast/unevaluated_expression.hpp"
 #include "ast/variables.hpp"
-#include "builtins.hpp"
-#include "error_handling.hpp"
+#include "ast/visitor.hpp"
 #include "ffi_parse.hpp"
 #include "lexer.hpp"
 #include "literals.hpp"
@@ -162,6 +164,90 @@ struct ErrException {
   std::string_view what;
 };
 
+bool coerceType(self::ExprBase *e, self::TypePtr type) {
+  if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
+    auto t = var->getDemangledName();
+    if (!var->type_ref.ptr) {
+      var->type_ref = type;
+      if (type.depth == 0)
+        throw std::runtime_error("var coercion depth should not be 0");
+      --var->type_ref.depth;
+      if (var->type_ref.depth == 0)
+        var->type_ref.is_ref = self::RefTypes::value;
+      return true;
+    }
+  } else if (auto *uneval = dynamic_cast<self::UnevaluatedExpression *>(e)) {
+    uneval->coerced_type = type;
+    return true;
+  }
+  return e->getType() == type;
+}
+
+size_t tuple_count(self::ExprBase *e) {
+  if (auto *tuple = dynamic_cast<self::Tuple *>(e))
+    return tuple->members.size();
+  return 1;
+}
+
+void for_tuple(self::ExprBase *e, auto unary) {
+  if (auto *tuple = dynamic_cast<self::Tuple *>(e)) {
+    for (auto &a : tuple->members) {
+      unary(*a);
+    }
+  }
+  unary(*e);
+}
+
+void for_tuple(self::ExprBase *left, auto gen, auto binary) {
+  if (auto *tuple = dynamic_cast<self::Tuple *>(left)) {
+    for (auto l = tuple->members.begin(); l != tuple->members.end(); ++l) {
+      binary(**l, gen());
+    }
+    throw std::runtime_error("for tuple mismatch");
+  }
+  binary(*left, gen());
+}
+
+void processSubtrees(self::ExprTree &tree, auto begin, auto end) {
+  for (auto open = begin; open != end; ++open) {
+    if (auto *open_paren =
+            dynamic_cast<self::UnevaluatedExpression *>(open->get());
+        open_paren && open_paren->getToken() == "(") {
+      for (auto close = 1 + open; close != end; ++close) {
+        if (auto *close_paren =
+                dynamic_cast<self::UnevaluatedExpression *>(close->get())) {
+          if (close_paren->getToken() == "(") {
+            processSubtrees(tree, close, end);
+          } else if (close_paren->getToken() == ")") {
+            auto subtree = self::makeExpr<self::ExprTree>({open_paren->pos});
+            subtree->reserve(std::distance(open + 1, close));
+            std::for_each(open + 1, close, [&](self::ExprPtr &e) {
+              subtree->emplace_back(std::move(e));
+            });
+            tree.erase(open, close + 1);
+            tree.insert(open, std::move(subtree));
+          }
+        }
+      }
+    }
+  }
+}
+
+void processSubtrees(self::ExprTree &tree) {
+  return processSubtrees(tree, tree.begin(), tree.end());
+}
+
+auto lookahead(auto it, auto &container) -> std::optional<decltype(it)> {
+  if (std::end(container) == it)
+    return std::nullopt;
+  return ++it;
+}
+auto lookbehind(auto it, auto container) -> std::optional<decltype(it)> {
+  if (std::begin(container) == it)
+    return std::nullopt;
+  return --it;
+}
+
 struct GlobalParser {
   static inline std::string err_string;
   // might want to make this a dictionary instead of a list. might scale better
@@ -169,41 +255,34 @@ struct GlobalParser {
   using TypeList = std::unordered_map<self::TokenView, self::TypeRef>;
   self::Context &c;
   self::ErrorList &err;
-  // todo: add proper compile error reporting later.
-  auto errReport(bool condition, std::string_view message) {
+
+  void errReport(bool condition, std::string_view message) {
     if (!condition) {
       err_string = message;
       throw std::runtime_error(err_string);
     }
   }
-
-  static void processSubtrees(self::ExprTree &tree, auto begin, auto end) {
-    for (auto open = begin; open != end; ++open) {
-      if (auto *open_paren =
-              dynamic_cast<self::UnevaluatedExpression *>(open->get());
-          open_paren && open_paren->getToken() == "(") {
-        for (auto close = 1 + open; close != end; ++close) {
-          if (auto *close_paren =
-                  dynamic_cast<self::UnevaluatedExpression *>(close->get())) {
-            if (close_paren->getToken() == "(") {
-              processSubtrees(tree, close, end);
-            } else if (close_paren->getToken() == ")") {
-              auto subtree = self::makeExpr<self::ExprTree>({open_paren->pos});
-              subtree->reserve(std::distance(open + 1, close));
-              std::for_each(open + 1, close, [&](self::ExprPtr &e) {
-                subtree->emplace_back(std::move(e));
-              });
-              tree.erase(open, close + 1);
-              tree.insert(open, std::move(subtree));
-            }
-          }
-        }
-      }
-    }
+  template <typename To> To expectCast(auto *from, std::string_view message) {
+    static_assert(std::is_pointer_v<To>,
+                  "type To must be either reference or pointer.");
+    auto to = dynamic_cast<To>(from);
+    errReport(to, message);
+    return to;
+  }
+  template <typename To> To expectCast(auto &from, std::string_view message) {
+    static_assert(std::is_reference_v<To>,
+                  "type To must be either reference or pointer.");
+    using T = std::remove_reference_t<To>;
+    auto to = dynamic_cast<T *>(&from);
+    errReport(to, message);
+    return *to;
   }
 
-  static void processSubtrees(self::ExprTree &tree) {
-    return processSubtrees(tree, tree.begin(), tree.end());
+  template <typename T> std::unique_ptr<T> upCast(self::ExprPtr &&unique) {
+    auto *ptr = unique.get();
+    auto *n = expectCast<T *>(ptr, "upcasting failed");
+    ptr = unique.release();
+    return std::unique_ptr<T>(n);
   }
 
   // notably there is only ever 1 tuple in the tree
@@ -221,22 +300,14 @@ struct GlobalParser {
           branch.push_back(std::move(ptr));
         });
         mark = it = tree.erase(mark, it + 1);
-        if (branch.size() > 1) {
-          tuple->members.emplace_back(evaluateTree(branch, context));
-        } else {
-          tuple->members.emplace_back(parseSymbol(branch.back(), context));
-        }
+        tuple->members.emplace_back(evaluateTree(branch, context));
         size = 0;
       }
     }
     if (!tuple->members.empty()) {
-      if (tree.size() > 1) {
-        tuple->members.emplace_back(evaluateTree(tree, context));
-      } else {
-        tuple->members.emplace_back(parseSymbol(tree.back(), context));
-        tree.pop_back();
-      }
+      tuple->members.emplace_back(evaluateTree(tree, context));
       tuple->members.shrink_to_fit();
+      tree.clear();
       tree.push_back(std::move(tuple));
     }
   }
@@ -272,50 +343,6 @@ struct GlobalParser {
     return mismatch;
   }
 
-  static bool coerceType(self::ExprBase *e, self::TypePtr type) {
-    if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
-      auto t = var->getDemangledName();
-      if (!var->type_ref.ptr) {
-        var->type_ref = type;
-        if (type.depth == 0)
-          throw std::runtime_error("var coercion depth should not be 0");
-        --var->type_ref.depth;
-        if (var->type_ref.depth == 0)
-          var->type_ref.is_ref = self::RefTypes::value;
-        return true;
-      }
-    } else if (auto *uneval = dynamic_cast<self::UnevaluatedExpression *>(e)) {
-      uneval->coerced_type = type;
-      return true;
-    }
-    return e->getType() == type;
-  }
-
-  static size_t tuple_count(self::ExprBase *e) {
-    if (auto *tuple = dynamic_cast<self::Tuple *>(e))
-      return tuple->members.size();
-    return 1;
-  }
-
-  static void for_tuple(self::ExprBase *e, auto unary) {
-    if (auto *tuple = dynamic_cast<self::Tuple *>(e)) {
-      for (auto &a : tuple->members) {
-        unary(*a);
-      }
-    }
-    unary(*e);
-  }
-
-  static void for_tuple(self::ExprBase *left, auto gen, auto binary) {
-    if (auto *tuple = dynamic_cast<self::Tuple *>(left)) {
-      for (auto l = tuple->members.begin(); l != tuple->members.end(); ++l) {
-        binary(**l, gen());
-      }
-      throw std::runtime_error("for tuple mismatch");
-    }
-    binary(*left, gen());
-  }
-
   template <typename T, bool pre = true, bool post = true>
   auto processFunction(auto &it, bool not_a_member, auto lhsrhsinc, auto cond,
                        auto cleanup, auto insert, auto coerce,
@@ -323,14 +350,22 @@ struct GlobalParser {
     if (auto *t = dynamic_cast<self::UnevaluatedExpression *>(it->get())) {
       auto lhs = it, rhs = it;
       lhsrhsinc(lhs, rhs);
-      auto candidates =
-          self::pair_range(context.equal_range(T::mangle(t->getToken())));
       std::vector<const T *> no_coerce;
       std::vector<const T *> coerced;
-      for (auto &[_, fun] : candidates) {
-        const auto &op = dynamic_cast<const T &>(fun.get());
-        if (not_a_member ^ op.member) {
-          cond(&op, lhs, rhs, no_coerce, coerced);
+      auto search = [&](auto candidates) {
+        for (auto &[_, fun] : candidates) {
+          const auto &op = dynamic_cast<const T &>(fun.get());
+          if (not_a_member ^ op.member) {
+            cond(&op, lhs, rhs, no_coerce, coerced);
+          }
+        }
+      };
+      search(self::pairRange(context.equalRange(T::mangle(t->getToken()))));
+      for (auto &hs : {lhs, rhs}) {
+        if (auto *str = dynamic_cast<const self::StructDef *>(
+                hs->get()->getType().ptr)) {
+          search(self::pairRange(
+              str->context->localEqualRange(T::mangle(t->getToken()))));
         }
       }
       if (!no_coerce.empty()) {
@@ -348,6 +383,56 @@ struct GlobalParser {
     }
   }
 
+  auto expectLookahead(auto it, auto &container, std::string_view error)
+      -> decltype(it) {
+    auto ahead = lookahead(it, container);
+    errReport(ahead.has_value(), error);
+    return *ahead;
+  }
+
+  void resolveMembers(self::ExprTree &container) {
+    for (auto it = container.begin(); it != container.end(); ++it) {
+      if (auto *t = dynamic_cast<self::UnevaluatedExpression *>(it->get());
+          t && t->getToken() == ".") {
+        auto behind = lookbehind(it, container).value();
+        auto &behind_ptr = expectCast<self::VarDeref &>(
+            **behind, "Dot operator expects a variable "
+                      "dereference to the left");
+        auto &struct_def = expectCast<const self::StructDef &>(
+            *behind_ptr.definition.value->getType().ptr,
+            "Dot operator should be used on structure type");
+        auto ahead = expectLookahead(it, container, "Expected member name");
+        auto &ahead_e = expectCast<self::UnevaluatedExpression &>(
+            **ahead, "Unknown parsing error: Uneval expected");
+        auto ahead_token = ahead_e.getToken();
+        auto ahead_pos = ahead->get()->pos;
+        auto n = self::VarDeclaration::mangle(ahead_token);
+        if (auto v = struct_def.context->findLocally(n)) {
+          auto structure = upCast<self::VarDeref>(std::move(*behind));
+          auto &var = dynamic_cast<self::VarDeclaration &>(v->get());
+          self::ExprPtr n = self::makeExpr<self::MemberDeref>(
+              ahead_pos, var, std::move(structure));
+          behind->swap(n);
+        } else if (auto f = struct_def.context->findLocally(
+                       self::FunctionDef::mangle(ahead_token))) {
+          auto &fun = dynamic_cast<self::FunctionDef &>(v->get());
+          errReport(fun.arguments.front()->getDemangledName() == "this",
+                    "Object-oriented-style function calls require 'this' "
+                    "parameter as first parameter");
+          auto arg_list = self::makeExpr<self::ArgPack>(ahead->get()->pos);
+          arg_list->members.reserve(fun.argcount());
+          arg_list->members.push_back(std::move(*behind));
+          auto call = self::makeExpr<self::FunctionCall>(ahead_pos, fun);
+          call->rhs = std::move(arg_list);
+          *behind = std::move(call);
+        }
+        container.erase(ahead);
+        container.erase(it);
+        it = behind;
+      }
+    }
+  }
+
   self::ExprPtr evaluateTree(self::ExprTree &tree, self::Index &local) {
     if (tree.empty()) {
       return self::makeExpr<self::Tuple>(tree.pos);
@@ -358,11 +443,19 @@ struct GlobalParser {
         ptr = evaluateTree(*uneval, local);
       }
     }
-    auto a = tree.dump();
+
     processTuples(tree, local);
-    for (auto &ptr : tree) {
-      ptr = parseSymbol(ptr, local);
-    } // clang-format off
+    for (auto it = tree.begin(); it != tree.end(); ++it) {
+      if (auto *p = dynamic_cast<self::UnevaluatedExpression *>(it->get())) {
+        if (p->getToken() == ".") {
+          ++it;
+          continue;
+        }
+      }
+      *it = parseSymbol(it, tree, local);
+    }
+    resolveMembers(tree);
+// clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunused-parameter"
     for (auto it = tree.begin(); it != tree.end(); ++it) {
@@ -458,28 +551,100 @@ struct GlobalParser {
     return std::move(tree.back());
   }
 
-  self::ExprPtr parseSymbol(self::ExprPtr &base, self::Index &local) {
-    if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(base.get());
+  self::FunctionDef *findCtor(self::StructDef &structure,
+                              std::span<self::ExprBase *> args) {
+    auto candidates =
+        structure.context->localEqualRange(self::FunctionDef::mangle("struct"));
+    std::vector<self::FunctionDef *> perfect;
+    std::vector<self::FunctionDef *> coerced;
+    for (auto &[_, f] : self::pairRange(candidates)) {
+      auto &ctor = dynamic_cast<self::FunctionDef &>(f.get());
+      if (ctor.argcount() != args.size())
+        continue;
+      auto arg_it = ctor.arguments.begin();
+      for (auto arg : args) {
+        if (arg_it == ctor.arguments.end())
+          goto cont;
+        auto type = arg_it->get()->getDecltype();
+        if (auto r = needCoerce(arg, type); r == coerce_result::mismatch)
+          goto cont;
+        else {
+          if (r == coerce_result::match)
+            perfect.push_back(&ctor);
+          else
+            coerced.push_back(&ctor);
+        }
+      }
+    cont:;
+    }
+    if (!perfect.empty()) {
+      errReport(perfect.size() == 1, "ambiguous constructor call");
+      return perfect.back();
+    } else {
+      errReport(!coerced.empty(), "No valid constructor calls");
+      errReport(coerced.size() == 1, "ambiguous constructor call");
+      return coerced.back();
+    }
+  }
+
+  self::ExprPtr parseSymbol(auto it, auto &container, self::Index &local) {
+    if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(it->get());
         maybe && !maybe->isComplete()) {
       auto t = maybe->getToken();
       if (auto [is_int, number] = isInt(t); is_int) {
-        return self::makeExpr<self::IntLit>(base->pos, number, c);
+        return self::makeExpr<self::IntLit>(it->get()->pos, number, c);
       } else if (auto [result, str] = isStr(t); result) {
-        return self::makeExpr<self::StringLit>(base->pos, str, c);
+        return self::makeExpr<self::StringLit>(it->get()->pos, str, c);
       } else if (auto [result, boolean] = isBool(t); result) {
-        return self::makeExpr<self::BoolLit>(base->pos, boolean, c);
+        return self::makeExpr<self::BoolLit>(it->get()->pos, boolean, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
         return self::makeExpr<self::BuiltinTypeLit>(
-            base->pos, self::BuiltinTypeLit::get(t, c));
+            it->get()->pos, self::BuiltinTypeLit::get(t, c));
       } else if (auto varname = self::VarDeclaration::mangle(t);
                  local.contains(varname)) {
         errReport(local.isUnique(varname), "ODR var declaration rule violated");
-        return self::makeExpr<self::VarDeref>(
-            base->pos, dynamic_cast<const self::VarDeclaration &>(
-                           local.find(varname)->get()));
+        auto &var =
+            dynamic_cast<self::VarDeclaration &>(local.find(varname)->get());
+        auto next = lookahead(it, container).value();
+        // checks for constructor call
+        if (var.getDecltype().ptr == &c.type_t && *next) {
+          if (auto *structure = dynamic_cast<self::StructLit *>(var.value)) {
+            self::FunctionDef *ctor = nullptr;
+            if (auto next_type = next->get()->getType(); next_type.ptr) {
+              auto args = std::array{next->get()};
+              ctor = findCtor(structure->value, args);
+              coerceType(next->get(), ctor->arguments.back()->getDecltype());
+            } else if (auto *tuple = dynamic_cast<self::Tuple *>(next->get())) {
+              std::vector<self::ExprBase *> exprs;
+              exprs.reserve(tuple->members.size());
+              std::for_each(
+                  tuple->members.begin(), tuple->members.end(),
+                  [&](self::ExprPtr &e) { exprs.push_back(e.get()); });
+              ctor = findCtor(structure->value, exprs);
+              auto arg_pack =
+                  self::makeExpr<self::ArgPack>(tuple->pos, std::move(*tuple));
+              auto decl = ctor->arguments.begin();
+              auto arg = arg_pack->members.begin();
+              while (decl != ctor->arguments.end() &&
+                     arg != arg_pack->members.end()) {
+                coerceType(arg->get(), decl->get()->getDecltype());
+                ++decl, ++arg;
+              }
+            } else {
+              goto leave;
+            }
+            auto result =
+                self::makeExpr<self::FunctionCall>(it->get()->pos, *ctor);
+            result->rhs = std::move(*next);
+            container.erase(next);
+            return result;
+          }
+        }
+      leave:
+        return self::makeExpr<self::VarDeref>(it->get()->pos, var);
       }
     }
-    return std::move(base);
+    return std::move(*it);
   }
   using callback = std::function<void(self::ExprTree &)>;
 
@@ -505,20 +670,17 @@ struct GlobalParser {
             self::makeExpr<self::UnevaluatedExpression>({t.col, t.line}, *t++));
       }
     }
-    return evaluateTree(tree, context);
+    return self::foldExpr(evaluateTree(tree, context), context).first;
   }
 
   self::ExprPtr parseVar(TokenIt &t, self::TokenView name,
                          self::Index &context) {
     using namespace self::reserved;
-    const auto guard = [this](auto t) {
-      if (!notReserved(t)) {
-        std::stringstream err;
-        err << "Token " << t << " is reserved";
-        errReport(false, err.str());
-      }
-    };
-    guard(name);
+    if (!notReserved(name)) {
+      std::stringstream err;
+      err << "Token " << name << " is reserved";
+      errReport(false, err.str());
+    }
     auto curr = self::makeExpr<self::VarDeclaration>(t.coord(), name);
     if (*t == ":") {
       ++t;
@@ -712,11 +874,11 @@ struct GlobalParser {
       while (*t != "}") {
         if (*t == "var") {
           auto name = *++t;
-          result.body.push_back(parseVar(++t, name, result.context));
+          result.body.push_back(parseVar(++t, name, *result.context));
         } else if (*t == "fun") {
           auto name = *++t;
           errReport(notReserved(name), "function name is reserved");
-          result.body.push_back(parseFun(++t, name, result.context));
+          result.body.push_back(parseFun(++t, name, *result.context));
         } else {
           errReport(self::reserved::isEndl(*t),
                     "expected a function or variable declaration.");
@@ -725,8 +887,31 @@ struct GlobalParser {
       }
       ++t;
       result.identity = id;
-      return self::makeExpr<self::StructLit>(p, std::move(result), c);
+      auto ret = self::makeExpr<self::StructLit>(p, std::move(result), c);
+      configStruct(ret);
+      return ret;
     }
+  }
+
+  void configStruct(std::unique_ptr<self::StructLit> &str) {
+    std::vector<std::unique_ptr<self::VarDeclaration>> args;
+    for (auto &member : str->value.body) {
+      if (auto *var_decl = dynamic_cast<self::VarDeclaration *>(member.get())) {
+        args.push_back(std::make_unique<self::VarDeclaration>(*var_decl));
+      }
+    }
+    args.shrink_to_fit();
+    auto ctor = std::make_unique<self::FunctionDef>(
+        "struct", *str->value.context, str->value, true, std::move(args));
+    ctor->return_type = {str->value};
+    str->value.insert(std::move(ctor));
+    str->value.insert(std::make_unique<self::OperatorDef>(
+        "=", self::TypeRef{str->value, self::RefTypes::ref},
+        self::VarDeclarationPtr("this",
+                                self::TypeRef(str->value, self::RefTypes::ref)),
+        self::VarDeclarationPtr("value", str->value), *str->value.context,
+        self::detail::assign, true));
+    str->value.body.shrink_to_fit();
   }
 
   auto fileOpen(std::string_view p) {

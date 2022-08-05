@@ -95,7 +95,7 @@ struct TypePtr {
 };
 
 struct Pos {
-  size_t col, line;
+  size_t col = 0, line = 0;
 };
 struct ExprBase;
 struct ExprVisitor;
@@ -130,7 +130,7 @@ template <typename T> inline std::unique_ptr<T> makeExpr(Pos pos) {
   return result;
 }
 
-inline auto cloneif(ExprPtr &&e) {
+inline auto cloneif(const ExprPtr &e) {
   if (e) {
     return e->clone();
   } else {

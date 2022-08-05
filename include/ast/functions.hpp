@@ -137,6 +137,11 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
   }
+  FunctionDef(TokenView name, Index &parent, TypeRef return_type,
+              bool member = false,
+              std::vector<std::unique_ptr<VarDeclaration>> &&args = {})
+      : FunBase(mangle(name), return_type, parent, member, detail::call),
+        arguments(std::move(args)) {}
   FunctionDef(detail::BuiltinInstruction b, TokenView name, Index &parent,
               TypeRef return_type, bool member = false, auto &&...args)
       : FunBase(mangle(name), return_type, parent, member, detail::call) {
@@ -185,8 +190,8 @@ public:
   FunctionCall(const FunBase &callee, ExprPtr &&LHS, ExprPtr &&RHS)
       : definition(callee), lhs(std::move(LHS)), rhs(std::move(RHS)) {}
   FunctionCall(const FunctionCall &other)
-      : definition(other.definition), lhs(cloneif(other.lhs->clone())),
-        rhs(other.rhs->clone()) {}
+      : definition(other.definition), lhs(cloneif(other.lhs)),
+        rhs(cloneif(other.rhs)) {}
   inline std::ostream &print(std::ostream &out) const override {
     if (lhs)
       out << *lhs << ' ';
