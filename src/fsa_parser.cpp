@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <bits/ranges_base.h>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -461,6 +462,7 @@ struct GlobalParser {
     for (auto it = tree.begin(); it != tree.end(); ++it) {
       processFunction<self::FunctionDef>(
           it, true, [](auto &lhs, auto &rhs) { ++rhs; },
+          //todo add type checking to fun param
           [](auto *fun, auto lhs, auto rhs,
              auto &perfect, auto& less_than) {
             if (fun->argcount() == tuple_count(rhs->get())) {
@@ -564,10 +566,10 @@ struct GlobalParser {
       auto arg_it = ctor.arguments.begin();
       for (auto arg : args) {
         if (arg_it == ctor.arguments.end())
-          goto cont;
+          continue;
         auto type = arg_it->get()->getDecltype();
         if (auto r = needCoerce(arg, type); r == coerce_result::mismatch)
-          goto cont;
+          continue;
         else {
           if (r == coerce_result::match)
             perfect.push_back(&ctor);
@@ -575,7 +577,6 @@ struct GlobalParser {
             coerced.push_back(&ctor);
         }
       }
-    cont:;
     }
     if (!perfect.empty()) {
       errReport(perfect.size() == 1, "ambiguous constructor call");
@@ -587,61 +588,76 @@ struct GlobalParser {
     }
   }
 
+  self::ExprPtr ctor_check(auto it, auto &container, auto &var) {
+    auto next = lookahead(it, container).value();
+    // checks for constructor call
+    auto *structure = dynamic_cast<self::StructLit *>(var.value);
+    if (var.getDecltype().ptr != &c.type_t || !*next || !structure)
+      return self::makeExpr<self::VarDeref>(it->get()->pos, var);
+    self::FunctionDef *ctor = nullptr;
+    if (auto next_type = next->get()->getType(); next_type.ptr) {
+      auto args = std::array{next->get()};
+      ctor = findCtor(structure->value, args);
+      coerceType(next->get(), ctor->arguments.back()->getDecltype());
+    } else if (auto *tuple = dynamic_cast<self::Tuple *>(next->get())) {
+      std::vector<self::ExprBase *> exprs;
+      exprs.reserve(tuple->members.size());
+      std::for_each(tuple->members.begin(), tuple->members.end(),
+                    [&](self::ExprPtr &e) { exprs.push_back(e.get()); });
+      ctor = findCtor(structure->value, exprs);
+      auto arg_pack =
+          self::makeExpr<self::ArgPack>(tuple->pos, std::move(*tuple));
+      auto decl = ctor->arguments.begin();
+      auto arg = arg_pack->members.begin();
+      while (decl != ctor->arguments.end() && arg != arg_pack->members.end()) {
+        coerceType(arg->get(), decl->get()->getDecltype());
+        ++decl, ++arg;
+      }
+    } else {
+      return self::makeExpr<self::VarDeref>(it->get()->pos, var);
+    }
+    auto result = self::makeExpr<self::FunctionCall>(it->get()->pos, *ctor);
+    result->rhs = std::move(*next);
+    container.erase(next);
+    return result;
+  }
+
+  auto search_vars(auto t, auto &local) {
+    self::Vars possibilities;
+    local.visit([&](self::SymbolMap &m) -> bool {
+      auto r = self::pairRange(m.equal_range(t));
+      if (std::ranges::distance(r) > 0) {
+        for (auto &[_, var] : r) {
+          possibilities.push_back(
+              dynamic_cast<self::VarDeclaration &>(var.get()));
+        }
+        return false;
+      }
+      return true;
+    });
+    return possibilities;
+  }
+
   self::ExprPtr parseSymbol(auto it, auto &container, self::Index &local) {
+    auto pos = it->get()->pos;
     if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(it->get());
         maybe && !maybe->isComplete()) {
       auto t = maybe->getToken();
       if (auto [is_int, number] = isInt(t); is_int) {
-        return self::makeExpr<self::IntLit>(it->get()->pos, number, c);
+        return self::makeExpr<self::IntLit>(pos, number, c);
       } else if (auto [result, str] = isStr(t); result) {
-        return self::makeExpr<self::StringLit>(it->get()->pos, str, c);
+        return self::makeExpr<self::StringLit>(pos, str, c);
       } else if (auto [result, boolean] = isBool(t); result) {
-        return self::makeExpr<self::BoolLit>(it->get()->pos, boolean, c);
+        return self::makeExpr<self::BoolLit>(pos, boolean, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
         return self::makeExpr<self::BuiltinTypeLit>(
-            it->get()->pos, self::BuiltinTypeLit::get(t, c));
+            pos, self::BuiltinTypeLit::get(t, c));
       } else if (auto varname = self::VarDeclaration::mangle(t);
                  local.contains(varname)) {
         errReport(local.isUnique(varname), "ODR var declaration rule violated");
         auto &var =
             dynamic_cast<self::VarDeclaration &>(local.find(varname)->get());
-        auto next = lookahead(it, container).value();
-        // checks for constructor call
-        if (var.getDecltype().ptr == &c.type_t && *next) {
-          if (auto *structure = dynamic_cast<self::StructLit *>(var.value)) {
-            self::FunctionDef *ctor = nullptr;
-            if (auto next_type = next->get()->getType(); next_type.ptr) {
-              auto args = std::array{next->get()};
-              ctor = findCtor(structure->value, args);
-              coerceType(next->get(), ctor->arguments.back()->getDecltype());
-            } else if (auto *tuple = dynamic_cast<self::Tuple *>(next->get())) {
-              std::vector<self::ExprBase *> exprs;
-              exprs.reserve(tuple->members.size());
-              std::for_each(
-                  tuple->members.begin(), tuple->members.end(),
-                  [&](self::ExprPtr &e) { exprs.push_back(e.get()); });
-              ctor = findCtor(structure->value, exprs);
-              auto arg_pack =
-                  self::makeExpr<self::ArgPack>(tuple->pos, std::move(*tuple));
-              auto decl = ctor->arguments.begin();
-              auto arg = arg_pack->members.begin();
-              while (decl != ctor->arguments.end() &&
-                     arg != arg_pack->members.end()) {
-                coerceType(arg->get(), decl->get()->getDecltype());
-                ++decl, ++arg;
-              }
-            } else {
-              goto leave;
-            }
-            auto result =
-                self::makeExpr<self::FunctionCall>(it->get()->pos, *ctor);
-            result->rhs = std::move(*next);
-            container.erase(next);
-            return result;
-          }
-        }
-      leave:
-        return self::makeExpr<self::VarDeref>(it->get()->pos, var);
+        return ctor_check(it, container, var);
       }
     }
     return std::move(*it);

@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_set>
+#include <vector>
 
 namespace self {
 
@@ -19,7 +20,7 @@ public:
   VarDeclaration(TokenView name) : name(mangle(name)), type_ref{nullptr} {}
   VarDeclaration(TokenView name, TypeRef type)
       : name(mangle(name)), type_ref{&type.ptr, type.is_ref} {}
-      
+
   inline std::ostream &print(std::ostream &out) const override {
     if (type_ref.ptr)
       return out << "var " << demangle(name) << ": " << type_ref.dump();
@@ -63,5 +64,23 @@ struct VarDeref : public ExprImpl<VarDeref> {
   virtual TypePtr getType() const noexcept override {
     return definition.getType();
   }
+};
+
+using Vars = std::vector<std::reference_wrapper<VarDeclaration>>;
+struct AmbiguousVarDeref : public ExprImpl<AmbiguousVarDeref> {
+  Vars possibilities;
+  std::string_view name;
+
+  AmbiguousVarDeref(
+      Vars &&definition)
+      : possibilities(std::move(definition)),
+        name(definition.front().get().getName()) {}
+
+  inline std::ostream &print(std::ostream &out) const override {
+    return out << "variable dereference: " << name;
+  }
+
+  inline std::string_view getName() const noexcept override { return name; }
+  bool isComplete() const override { return false; }
 };
 } // namespace self

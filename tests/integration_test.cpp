@@ -27,10 +27,7 @@ constexpr auto output_name = "a.out";
 constexpr auto link_command =
     "ld -pie --eh-frame-hdr -dynamic-linker "
     "/lib64/ld-linux-x86-64.so.2 /usr/lib64/Scrt1.o /usr/lib64/crti.o "
-    "/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtbeginS.o "
-    "-L/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0 "
-    "-L/usr/lib64 -L/lib64 -L/lib -L/usr/lib {} {} -lc "
-    "/usr/lib64/gcc/x86_64-pc-linux-gnu/12.1.0/crtendS.o "
+    "{} {} -lc "
     "/usr/lib64/crtn.o -o {}";
 auto get_stdlib() {
   auto working = std::filesystem::current_path();

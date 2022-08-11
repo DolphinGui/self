@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <bits/ranges_algo.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <llvm/IR/DIBuilder.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalValue.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
@@ -35,6 +37,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 #include <memory>
+#include <ranges>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -51,14 +55,62 @@
 #include "builtins.hpp"
 
 namespace {
+llvm::DIType *strDI(llvm::Module &module, llvm::DIBuilder &di,
+                    llvm::StructType *str_type) {
+  auto data_layout = module.getDataLayout();
+  auto ptrbits = data_layout.getPointerSizeInBits();
+  auto str_layout = data_layout.getStructLayout(str_type);
+  auto offsets = str_layout->getElementOffsetInBits(1);
+  auto ptr = di.createMemberType(
+      nullptr, "raw_str", nullptr, 0, ptrbits, 0, 0,
+      llvm::DINode::DIFlags::FlagArtificial,
+      di.createPointerType(
+          di.createBasicType("", 8, llvm::dwarf::DW_ATE_signed_char), ptrbits));
+  auto size = di.createMemberType(
+      nullptr, "size", nullptr, 0, ptrbits, 0, offsets,
+      llvm::DINode::DIFlags::FlagArtificial,
+      di.createBasicType("i64", 64, llvm::dwarf::DW_ATE_unsigned));
+  auto str = di.createStructType(
+      nullptr, "str", nullptr, 0, str_layout->getSizeInBits(), 64,
+      llvm::DINode::DIFlags::FlagArtificial, nullptr, {});
+  di.replaceArrays(str, di.getOrCreateArray({ptr, size}));
+  return str;
+}
+
+llvm::GlobalVariable *createArr(llvm::Module &module,
+                                std::span<llvm::Function *> ctors,
+                                llvm::LLVMContext &llvm) {
+  auto type = llvm::StructType::get(llvm, {llvm::Type::getInt32Ty(llvm),
+                                           llvm::PointerType::get(llvm, 0),
+                                           llvm::PointerType::get(llvm, 0)});
+  auto ctor_type = llvm::ArrayType::get(type, ctors.size());
+  auto ctor_arr = std::vector<llvm::Constant *>();
+  ctor_arr.reserve(ctors.size());
+  auto ptr_type = llvm::PointerType::get(llvm, 0);
+  auto *max = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm), 65535);
+  std::ranges::for_each(ctors, [&](llvm::Function *f) {
+    ctor_arr.push_back(llvm::ConstantStruct::get(
+        type, {max, f, llvm::ConstantPointerNull::get(ptr_type)}));
+  });
+  auto global = new llvm::GlobalVariable(
+      ctor_type, true, llvm::GlobalVariable::AppendingLinkage,
+      llvm::ConstantArray::get(ctor_type, ctor_arr), "llvm.global_ctors");
+  return global;
+}
 using namespace self;
+
 // I swear this is proof c++
 // needs virtual function params
 struct Generator : ExprVisitor {
 private:
   llvm::LLVMContext &llvm;
   self::Context &context;
-  std::unordered_map<std::string, llvm::AllocaInst *> var_map{};
+  // memory leak: vars of functions are held after the fun's done
+  // might want to pass this as a data param
+  std::unordered_map<const self::VarDeclaration *, llvm::AllocaInst *>
+      var_map{};
+  std::unordered_map<const self::VarDeclaration *, llvm::GlobalVariable *>
+      global_map{};
   std::vector<llvm::DIScope *> stack;
   llvm::Module &module;
   llvm::DIBuilder &di;
@@ -66,12 +118,21 @@ private:
   llvm::DICompileUnit *compile_unit;
   llvm::StructType *str_type;
   llvm::DIType *str_ditype;
+  llvm::FunctionType *ctor_type;
+  std::vector<llvm::Function *> ctor_list;
   struct Params {
     const self::ExprBase *expr;
     llvm::IRBuilder<> &builder;
     bool return_val;
     llvm::Value *ret = nullptr;
   };
+
+  llvm::DIScope *sp() {
+    if (stack.size() == 1)
+      return nullptr;
+    else
+      return stack.back();
+  }
 
 public:
   Generator(Context &c, llvm::LLVMContext &context, llvm::Module &m,
@@ -85,28 +146,10 @@ public:
         compile_unit(di.createCompileUnit(llvm::dwarf::DW_LANG_C, file,
                                           "SELF compiler", false, "", 0)) {
     stack.push_back(compile_unit);
-    // TODO: query llvm for ptr size and offsets
-    auto data_layout = module.getDataLayout();
-    auto ptrbits = data_layout.getPointerSizeInBits();
-    auto str_layout = data_layout.getStructLayout(str_type);
-    auto offsets = str_layout->getElementOffsetInBits(1);
-    auto ptr = di.createMemberType(
-        nullptr, "raw_str", nullptr, 0, ptrbits, 0, 0,
-        llvm::DINode::DIFlags::FlagArtificial,
-        di.createPointerType(
-            di.createBasicType("", 8, llvm::dwarf::DW_ATE_signed_char),
-            ptrbits));
-    auto size = di.createMemberType(
-        nullptr, "size", nullptr, 0, ptrbits, 0, offsets,
-        llvm::DINode::DIFlags::FlagArtificial,
-        di.createBasicType("i64", 64, llvm::dwarf::DW_ATE_unsigned));
-    auto str = di.createStructType(
-        nullptr, "str", nullptr, 0, str_layout->getSizeInBits(), 64,
-        llvm::DINode::DIFlags::FlagArtificial, nullptr, {});
-    di.replaceArrays(str, di.getOrCreateArray({ptr, size}));
-    str_ditype = str;
+    str_ditype = strDI(module, di, str_type);
+    ctor_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm), false);
   }
-  void generateFun(const self::FunBase &fun, self::Context &c) {
+  void generateFun(const self::FunBase &fun) {
     auto subprogram = di.createFunction(
         file, fun.getDemangled(), fun.getForeignName(), file, fun.pos.line,
         createFunDebugType(fun), fun.pos.line, llvm::DINode::FlagPrototyped,
@@ -136,6 +179,27 @@ public:
     }
     stack.pop_back();
     di.finalizeSubprogram(subprogram);
+  }
+
+  void generateGlobal(const self::VarDeclaration &var) {
+    if (var.getType().ptr == &context.type_t) {
+      return;
+    }
+    auto global = new llvm::GlobalVariable(module, getType(var), false,
+                                           llvm::GlobalVariable::PrivateLinkage,
+                                           nullptr, var.getDemangledName());
+    global_map.insert({&var, global});
+    global->setInitializer(getZeroed(var.getDecltype()));
+    if (var.value) {
+      auto initfun = llvm::Function::Create(
+          ctor_type, llvm::Function::PrivateLinkage, "", module);
+      auto block = llvm::BasicBlock::Create(llvm, "entry", initfun);
+      auto builder = llvm::IRBuilder<>(llvm);
+      builder.SetInsertPoint(block);
+      builder.CreateStore(dispatch(var.value, builder), global);
+      builder.CreateRetVoid();
+      ctor_list.push_back(initfun);
+    }
   }
 
 private:
@@ -224,8 +288,7 @@ private:
 
   void operator()(const IntLit &lit, void *data) override {
     auto &d = *static_cast<Params *>(data);
-    d.ret = llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvm),
-                                   llvm::APInt(64, lit.value, true));
+    d.ret = llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvm), lit.value);
   }
 
   void operator()(const StringLit &str, void *data) override {
@@ -261,18 +324,20 @@ private:
     auto line = var.pos.line, col = var.pos.col;
     auto result =
         d.builder.CreateAlloca(getType(var), 0, var.getDemangledName());
-    var_map.insert({var.getDemangledName(), result});
-    auto n = di.createAutoVariable(stack.back(), var.getDemangledName(), file,
-                                   line, getDIType(var.getDecltype()));
-    di.insertDeclare(result, n, di.createExpression(),
-                     llvm::DILocation::get(llvm, line, col, stack.back()),
-                     d.builder.GetInsertBlock());
+    var_map.insert({&var, result});
+    if (auto back = sp()) {
+      auto n = di.createAutoVariable(back, var.getDemangledName(), file, line,
+                                     getDIType(var.getDecltype()));
+      di.insertDeclare(result, n, di.createExpression(),
+                       llvm::DILocation::get(llvm, line, col, back),
+                       d.builder.GetInsertBlock());
+    }
     d.ret = result;
   }
 
   void operator()(const VarDeref &var, void *data) override {
     auto &d = *static_cast<Params *>(data);
-    auto result = var_map.at(self::VarDeclaration::demangle(var.getName()));
+    auto result = var_map.at(&var.definition);
     if (var.definition.getDecltype().depth > 0) {
       auto load = d.builder.CreateLoad(llvm::PointerType::get(llvm, 0), result);
       d.ret = load;
@@ -424,13 +489,13 @@ private:
   }
 
   void emitLocation(Pos pos, llvm::IRBuilder<> &builder) {
-    builder.SetCurrentDebugLocation(
-        llvm::DILocation::get(llvm, pos.line, pos.col, stack.back()));
+    if (auto back = sp())
+      builder.SetCurrentDebugLocation(
+          llvm::DILocation::get(llvm, pos.line, pos.col, back));
   }
 
   void emitLocation(const ExprBase &expr, llvm::IRBuilder<> &builder) {
-    builder.SetCurrentDebugLocation(
-        llvm::DILocation::get(llvm, expr.pos.line, expr.pos.col, stack.back()));
+    emitLocation(expr.pos, builder);
   }
 
   unsigned int getDwarf(self::TypeRef t) {
@@ -487,6 +552,29 @@ private:
     }
   }
 
+  llvm::Constant *getZeroed(self::TypeRef t) {
+    auto null_ptr =
+        llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm, 0));
+    auto zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvm), 0);
+    if (t.is_ref == self::RefTypes::ref) {
+      return null_ptr;
+    }
+    if (t == context.i64_t) {
+      return zero;
+    }
+    if (t == context.u64_t) {
+      return zero;
+    }
+    if (t == context.bool_t) {
+      return llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm), 0);
+    }
+    if (t == context.str_t) {
+      llvm::ConstantStruct::get(str_type, {null_ptr, zero});
+    }
+
+    throw std::runtime_error("non ints not implemented right now");
+  }
+
   size_t getBitsize(TypeRef t) {
     return module.getDataLayout().getTypeAllocSizeInBits(getType(t));
   }
@@ -534,15 +622,14 @@ codegen(const self::ExprTree &ast, Context &c, llvm::LLVMContext &llvm,
 
   auto di = std::make_unique<llvm::DIBuilder>(*module);
   auto g = Generator(c, llvm, *module, *di, file);
-  for (auto &expr : ast) { // clang-format off
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wpotentially-evaluated-expression"
-    // clang-format on
-    if (auto *FunctionDef =
-            dynamic_cast<self::FunBase *>(expr.get())) { // clang-format off
-    #pragma clang diagnostic pop
-      // clang-format on
-      g.generateFun(*FunctionDef, c);
+  for (auto &expr : ast) {
+    if (auto *function = dynamic_cast<self::FunBase *>(expr.get())) {
+      g.generateFun(*function);
+    } else if (auto *assign = dynamic_cast<self::FunctionCall *>(expr.get())) {
+      if (auto *global =
+              dynamic_cast<self::VarDeclaration *>(assign->lhs.get())) {
+        g.generateGlobal(*global);
+      }
     } else {
       throw std::runtime_error("unimplemented");
     }
@@ -551,6 +638,7 @@ codegen(const self::ExprTree &ast, Context &c, llvm::LLVMContext &llvm,
   if (llvm::verifyModule(*module, &llvm::errs())) {
     std::exit(2);
   }
+
   return {std::move(module), std::move(di)};
 }
 } // namespace self

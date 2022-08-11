@@ -1,9 +1,10 @@
 extern "C" import "../stdlib/include/io.h"
 
+var a = 12
+
 fun main()->i64{
   var a = 'hello world\n'
-  var b = ref(a)
   selfprint(a)
-  selfprint(b)
+  printnum(a)
   return 0
 }

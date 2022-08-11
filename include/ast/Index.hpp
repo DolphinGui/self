@@ -1,8 +1,11 @@
 #pragma once
 
 #include "expression.hpp"
+#include "pair_range.hpp"
 #include <iterator>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace self {
 class Index {
@@ -32,6 +35,17 @@ public:
     return std::pair{curr.end(), curr.end()};
   }
 
+  // if visitor returns true, it calls this with parent.
+  // If visitor returns false, it terminates
+  void visit(auto visitor) {
+    static_assert(
+        std::is_same_v<std::invoke_result_t<decltype(visitor), SymbolMap &>,
+                       bool>,
+        "visitor must return bool");
+    if (visitor(curr) && parent)
+      parent->visit(visitor);
+  }
+
   auto localEqualRange(TokenView t) const { return curr.equal_range(t); }
   bool isRoot() const noexcept { return parent; }
   bool isUnique(TokenView t) const {
@@ -46,6 +60,7 @@ public:
   std::optional<ExprRef> findLocally(TokenView t) {
     return confirm(localEqualRange(t));
   }
+
   void insert(std::pair<TokenView, ExprRef> &&pair) {
     curr.insert(std::forward<std::pair<TokenView, ExprRef>>(pair));
   }

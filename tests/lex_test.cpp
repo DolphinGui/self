@@ -36,13 +36,9 @@ constexpr auto import_test = "extern \"C\" import \"../stdlib/include/io.h\""
 int main() {
   uint count = 0;
   self::Context c;
-  for (auto file : {
-           struct_test,
-           // nesting, reference, while_inline, do_while,
-           //                   if_else_block, if_else, elif, boolean,
-           //                   import_test, function_def, expr, deref,
-           //                   var_decl, foward_decl
-       }) {
+  for (auto file : {struct_test, nesting, reference, while_inline, do_while,
+                    if_else_block, if_else, elif, boolean, import_test,
+                    function_def, expr, deref, var_decl, foward_decl}) {
     fmt::print("Test {}:\n", count++);
     auto f = std::string(file);
     auto results = self::parseFile(f, c);

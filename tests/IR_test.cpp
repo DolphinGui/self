@@ -1,4 +1,6 @@
 #include <cstdlib>
+#include <llvm/CodeGen/GCMetadata.h>
+#include <llvm/CodeGen/GCMetadataPrinter.h>
 #include <llvm/IR/DIBuilder.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
@@ -53,23 +55,10 @@ int main() {
   LLVMContext llvm;
   llvm.enableOpaquePointers();
   auto m = Module("this is a module name I guess", llvm);
-  auto di = DIBuilder(m, false);
-  auto file = di.createFile("fake.me", "../examples");
-  auto compile_unit = di.createCompileUnit(dwarf::DW_LANG_C, file,
-                                           "IR generation test", false, "", 0);
   auto int_t = Type::getInt64Ty(llvm);
   auto ptr_t = PointerType::get(llvm, 0);
-  // auto printer = Function::Create(FunctionType::get(int_t, {ptr_t}, false),
-  //                                 GlobalValue::ExternalLinkage, "printnum",
-  //                                 m);
   auto main = Function::Create(FunctionType::get(int_t, false),
                                GlobalValue::ExternalLinkage, "main", m);
-  main->setDSOLocal(true);
-  auto main_debug_t = di.createSubroutineType({});
-  auto main_debug =
-      di.createFunction(compile_unit, "main", "main", file, 1, main_debug_t, 1,
-                        DINode::FlagPrototyped, DISubprogram::SPFlagDefinition);
-  main->setSubprogram(main_debug);
   auto block = BasicBlock::Create(llvm, "entry", main);
   auto builder = IRBuilder<>(llvm);
   builder.SetInsertPoint(block);
@@ -92,7 +81,6 @@ int main() {
     errs() << "TargetMachine can't emit a file of this type\n";
     throw std::runtime_error("");
   }
-  di.finalize();
   if (llvm::verifyModule(m, &llvm::errs())) {
     std::exit(-1);
   }
