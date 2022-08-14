@@ -65,22 +65,4 @@ struct VarDeref : public ExprImpl<VarDeref> {
     return definition.getType();
   }
 };
-
-using Vars = std::vector<std::reference_wrapper<VarDeclaration>>;
-struct AmbiguousVarDeref : public ExprImpl<AmbiguousVarDeref> {
-  Vars possibilities;
-  std::string_view name;
-
-  AmbiguousVarDeref(
-      Vars &&definition)
-      : possibilities(std::move(definition)),
-        name(definition.front().get().getName()) {}
-
-  inline std::ostream &print(std::ostream &out) const override {
-    return out << "variable dereference: " << name;
-  }
-
-  inline std::string_view getName() const noexcept override { return name; }
-  bool isComplete() const override { return false; }
-};
 } // namespace self

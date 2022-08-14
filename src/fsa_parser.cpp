@@ -79,23 +79,23 @@ std::vector<unsigned char> convertString(std::string_view s) {
   return result;
 }
 
-std::pair<bool, std::vector<unsigned char>> isStr(self::TokenView t) {
+std::optional<std::vector<unsigned char>> isStr(self::TokenView t) {
   if (t.front() != '\'' && t.front() != '\"')
-    return {false, {}};
+    return std::nullopt;
   if (!t.ends_with('\'') && !t.ends_with('\"'))
-    return {false, {}};
+    return std::nullopt;
   auto literal = convertString(t);
   escape(literal);
-  return {true, literal};
+  return literal;
 }
 
-std::pair<bool, bool> isBool(self::TokenView t) {
+std::optional<bool> isBool(self::TokenView t) {
   if (t == "true")
-    return {true, true};
+    return true;
   else if (t == "false")
-    return {true, false};
+    return false;
   else
-    return {false, false};
+    return std::nullopt;
 }
 
 constexpr auto notReserved = [](auto t) {
@@ -165,8 +165,8 @@ struct ErrException {
   std::string_view what;
 };
 
-bool coerceType(self::ExprBase *e, self::TypePtr type) {
-  if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
+bool coerceType(self::ExprPtr &e, self::TypePtr type) {
+  if (auto *var = dynamic_cast<self::VarDeclaration *>(e.get())) {
     auto t = var->getDemangledName();
     if (!var->type_ref.ptr) {
       var->type_ref = type;
@@ -177,7 +177,8 @@ bool coerceType(self::ExprBase *e, self::TypePtr type) {
         var->type_ref.is_ref = self::RefTypes::value;
       return true;
     }
-  } else if (auto *uneval = dynamic_cast<self::UnevaluatedExpression *>(e)) {
+  } else if (auto *uneval =
+                 dynamic_cast<self::UnevaluatedExpression *>(e.get())) {
     uneval->coerced_type = type;
     return true;
   }
@@ -190,23 +191,23 @@ size_t tuple_count(self::ExprBase *e) {
   return 1;
 }
 
-void for_tuple(self::ExprBase *e, auto unary) {
-  if (auto *tuple = dynamic_cast<self::Tuple *>(e)) {
+void for_tuple(self::ExprPtr &e, auto unary) {
+  if (auto *tuple = dynamic_cast<self::Tuple *>(e.get())) {
     for (auto &a : tuple->members) {
       unary(*a);
     }
-  }
-  unary(*e);
+  } else
+    unary(e);
 }
 
-void for_tuple(self::ExprBase *left, auto gen, auto binary) {
-  if (auto *tuple = dynamic_cast<self::Tuple *>(left)) {
+void for_tuple(self::ExprPtr &left, auto gen, auto binary) {
+  if (auto *tuple = dynamic_cast<self::Tuple *>(left.get())) {
     for (auto l = tuple->members.begin(); l != tuple->members.end(); ++l) {
-      binary(**l, gen());
+      binary(*l, gen());
     }
     throw std::runtime_error("for tuple mismatch");
-  }
-  binary(*left, gen());
+  } else
+    binary(left, gen());
 }
 
 void processSubtrees(self::ExprTree &tree, auto begin, auto end) {
@@ -313,10 +314,25 @@ struct GlobalParser {
     }
   }
 
-  enum struct coerce_result { match, coerce, mismatch };
-  coerce_result needCoerce(const self::ExprBase *e, self::TypePtr type) {
-    using enum coerce_result;
-    if (const auto *var = dynamic_cast<const self::VarDeclaration *>(e)) {
+  enum struct coerceResult { match, coerce, mismatch };
+
+  coerceResult typeCoercible(self::TypePtr to, self::TypePtr from) {
+    using enum coerceResult;
+    if (to.ptr == from.ptr) {
+      if (to.depth == from.depth)
+        return match;
+      if (to.depth - 1 == from.depth)
+        return coerce;
+    }
+    if (from.ptr == &c.deduced_t && to.depth - 1 == from.depth) {
+      return match;
+    }
+    return mismatch;
+  }
+
+  coerceResult needCoerce(self::ExprBase *e, self::TypePtr type) {
+    using enum coerceResult;
+    if (auto *var = dynamic_cast<self::VarDeclaration *>(e)) {
       if (!var->getDecltype().ptr) {
         return coerce;
       } else if (var->getDecltype() == type) {
@@ -327,21 +343,7 @@ struct GlobalParser {
       return coerce;
     }
 
-    auto etype = e->getType();
-    if (etype.ptr == type.ptr) {
-      if (etype.depth == type.depth)
-        return match;
-      else if (etype.depth - 1 == type.depth)
-        return coerce;
-    }
-
-    // hardcoded ref assignment check
-    if (type.ptr == &c.deduced_t) {
-      if (etype.depth - 1 == type.depth)
-        return match;
-    }
-
-    return mismatch;
+    return typeCoercible(e->getType(), type);
   }
 
   template <typename T, bool pre = true, bool post = true>
@@ -362,6 +364,7 @@ struct GlobalParser {
         }
       };
       search(self::pairRange(context.equalRange(T::mangle(t->getToken()))));
+      // argument dependent lookup
       for (auto &hs : {lhs, rhs}) {
         if (auto *str = dynamic_cast<const self::StructDef *>(
                 hs->get()->getType().ptr)) {
@@ -371,6 +374,7 @@ struct GlobalParser {
       }
       if (!no_coerce.empty()) {
         errReport(no_coerce.size() == 1, "ambiguous operator call");
+        coerce(*no_coerce.back(), *lhs, *rhs);
         auto result = insert(no_coerce.back(), lhs, rhs, no_coerce.back()->pos);
         cleanup(lhs, rhs);
         *it = std::move(result);
@@ -483,16 +487,16 @@ struct GlobalParser {
             return result;
           }, [](const self::FunctionDef& fun, auto& lhs, auto& rhs){
             int i = 0;
-            for_tuple(rhs.get(), [&]{
+            for_tuple(rhs, [&]{
               return fun.arguments.at(i++)->getDecltype();},
-              [](self::ExprBase& e, auto type){coerceType(&e, type);});
+              [](self::ExprPtr& e, auto type){coerceType(e, type);});
           }, local);
     }
     #pragma clang diagnostic pop // clang-format on
 
     auto binCondition = [&](auto *op, auto lhs, auto rhs, auto &no_coerce,
                             auto &coerce_r) {
-      using enum coerce_result;
+      using enum coerceResult;
       auto left = needCoerce(lhs->get(), op->lhs->getDecltype());
       auto right = needCoerce(rhs->get(), op->rhs->getDecltype());
       if (left == match && right == match) {
@@ -522,11 +526,11 @@ struct GlobalParser {
         var.value = rhs.get();
       }
       if (auto n = fun.lhs->getDecltype(); n.ptr == &c.deduced_t) {
-        coerceType(lhs.get(), rhs.get()->getType());
+        coerceType(lhs, rhs.get()->getType());
       } else {
-        coerceType(lhs.get(), n);
+        coerceType(lhs, n);
       }
-      coerceType(rhs.get(), fun.rhs->getDecltype());
+      coerceType(rhs, fun.rhs->getDecltype());
     };
     // left-right associative pass
     for (auto it = tree.begin(); it != tree.end(); ++it) {
@@ -568,10 +572,10 @@ struct GlobalParser {
         if (arg_it == ctor.arguments.end())
           continue;
         auto type = arg_it->get()->getDecltype();
-        if (auto r = needCoerce(arg, type); r == coerce_result::mismatch)
+        if (auto r = needCoerce(arg, type); r == coerceResult::mismatch)
           continue;
         else {
-          if (r == coerce_result::match)
+          if (r == coerceResult::match)
             perfect.push_back(&ctor);
           else
             coerced.push_back(&ctor);
@@ -588,17 +592,18 @@ struct GlobalParser {
     }
   }
 
-  self::ExprPtr ctor_check(auto it, auto &container, auto &var) {
+  self::ExprPtr ctorCheck(auto it, auto &container, auto &var, auto pos) {
     auto next = lookahead(it, container).value();
     // checks for constructor call
     auto *structure = dynamic_cast<self::StructLit *>(var.value);
-    if (var.getDecltype().ptr != &c.type_t || !*next || !structure)
-      return self::makeExpr<self::VarDeref>(it->get()->pos, var);
+    if (var.getDecltype().ptr != &c.type_t || !*next || !structure) {
+      return self::makeExpr<self::VarDeref>(pos, var);
+    }
     self::FunctionDef *ctor = nullptr;
     if (auto next_type = next->get()->getType(); next_type.ptr) {
       auto args = std::array{next->get()};
       ctor = findCtor(structure->value, args);
-      coerceType(next->get(), ctor->arguments.back()->getDecltype());
+      coerceType(*next, ctor->arguments.back()->getDecltype());
     } else if (auto *tuple = dynamic_cast<self::Tuple *>(next->get())) {
       std::vector<self::ExprBase *> exprs;
       exprs.reserve(tuple->members.size());
@@ -610,32 +615,16 @@ struct GlobalParser {
       auto decl = ctor->arguments.begin();
       auto arg = arg_pack->members.begin();
       while (decl != ctor->arguments.end() && arg != arg_pack->members.end()) {
-        coerceType(arg->get(), decl->get()->getDecltype());
+        coerceType(*arg, decl->get()->getDecltype());
         ++decl, ++arg;
       }
     } else {
-      return self::makeExpr<self::VarDeref>(it->get()->pos, var);
+      return self::makeExpr<self::VarDeref>(pos, var);
     }
-    auto result = self::makeExpr<self::FunctionCall>(it->get()->pos, *ctor);
+    auto result = self::makeExpr<self::FunctionCall>(pos, *ctor);
     result->rhs = std::move(*next);
     container.erase(next);
     return result;
-  }
-
-  auto search_vars(auto t, auto &local) {
-    self::Vars possibilities;
-    local.visit([&](self::SymbolMap &m) -> bool {
-      auto r = self::pairRange(m.equal_range(t));
-      if (std::ranges::distance(r) > 0) {
-        for (auto &[_, var] : r) {
-          possibilities.push_back(
-              dynamic_cast<self::VarDeclaration &>(var.get()));
-        }
-        return false;
-      }
-      return true;
-    });
-    return possibilities;
   }
 
   self::ExprPtr parseSymbol(auto it, auto &container, self::Index &local) {
@@ -645,10 +634,10 @@ struct GlobalParser {
       auto t = maybe->getToken();
       if (auto [is_int, number] = isInt(t); is_int) {
         return self::makeExpr<self::IntLit>(pos, number, c);
-      } else if (auto [result, str] = isStr(t); result) {
-        return self::makeExpr<self::StringLit>(pos, str, c);
-      } else if (auto [result, boolean] = isBool(t); result) {
-        return self::makeExpr<self::BoolLit>(pos, boolean, c);
+      } else if (auto str = isStr(t)) {
+        return self::makeExpr<self::StringLit>(pos, *str, c);
+      } else if (auto boolean = isBool(t)) {
+        return self::makeExpr<self::BoolLit>(pos, *boolean, c);
       } else if (self::BuiltinTypeLit::contains(t, c)) {
         return self::makeExpr<self::BuiltinTypeLit>(
             pos, self::BuiltinTypeLit::get(t, c));
@@ -657,7 +646,7 @@ struct GlobalParser {
         errReport(local.isUnique(varname), "ODR var declaration rule violated");
         auto &var =
             dynamic_cast<self::VarDeclaration &>(local.find(varname)->get());
-        return ctor_check(it, container, var);
+        return ctorCheck(it, container, var, pos);
       }
     }
     return std::move(*it);
@@ -940,11 +929,11 @@ struct GlobalParser {
   }
 
   auto parseStrLit(TokenIt &t, std::string_view err) {
-    auto [a, b] = isStr(*t);
-    errReport(a, err);
+    auto a = isStr(*t);
+    errReport(!a->empty(), err);
     std::string unconvert;
-    unconvert.reserve(b.size());
-    std::for_each(b.begin(), b.end(),
+    unconvert.reserve(a->size());
+    std::for_each(a->begin(), a->end(),
                   [&](unsigned char c) { unconvert.push_back(c); });
     return unconvert;
   }

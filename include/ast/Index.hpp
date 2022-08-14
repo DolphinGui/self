@@ -2,7 +2,9 @@
 
 #include "expression.hpp"
 #include "pair_range.hpp"
+#include <functional>
 #include <iterator>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -25,6 +27,12 @@ public:
   explicit Index(Index &parent) noexcept : parent(&parent) {}
   Index(const Index &other) : parent(other.parent) {}
   static Index createRoot() { return Index(); }
+  std::optional<std::reference_wrapper<Index>> getParent() {
+    if (parent)
+      return *parent;
+    else
+      return std::nullopt;
+  }
 
   auto equalRange(TokenView t) const {
     auto result = curr.equal_range(t);
