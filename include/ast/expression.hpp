@@ -97,11 +97,19 @@ struct TypePtr {
 struct Pos {
   size_t col = 0, line = 0;
 };
+
+enum struct Qualifiers : unsigned char {
+  none,
+  qImport,
+  qExport,
+};
+
 struct ExprBase;
 struct ExprVisitor;
 using ExprPtr = std::unique_ptr<ExprBase>;
 struct ExprBase {
   Pos pos;
+  Qualifiers qualifiers = Qualifiers::none;
   virtual ~ExprBase() = default;
   virtual bool isComplete() const { return true; }
   virtual TypePtr getType() const noexcept { return {nullptr}; }

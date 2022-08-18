@@ -102,8 +102,8 @@ auto addStructMember(CXCursor cursor, CXCursor parent, CXClientData d) {
 } // namespace
 
 namespace self {
-void parseFFI(ExprTree &in, Index &context, Context &c,
-              std::string_view path, std::string flags) {
+void parseFFI(ExprTree &in, Index &context, Context &c, std::string_view path,
+              std::string flags) {
   CXIndex index = clang_createIndex(0, 0);
   auto pointers = split(flags);
   CXTranslationUnit unit;
@@ -124,8 +124,9 @@ void parseFFI(ExprTree &in, Index &context, Context &c,
         switch (clang_getCursorKind(cursor)) {
         case CXCursor_FunctionDecl: {
           auto name = getCursorName(cursor);
-
-          auto f = std::make_unique<self::FunctionDef>(name, data.symbols, false);
+          auto f =
+              std::make_unique<self::FunctionDef>(name, data.symbols, false);
+          f->qualifiers = Qualifiers::qImport;
           f->foreign_name = convertString(clang_Cursor_getMangling(cursor));
           auto argc = clang_Cursor_getNumArguments(cursor);
           auto retType = clang_getResultType(clang_getCursorType(cursor));

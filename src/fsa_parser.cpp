@@ -798,8 +798,8 @@ struct GlobalParser {
     return body;
   }
 
-  self::ExprPtr parseFun(TokenIt &t, self::TokenView name,
-                         self::Index &parent) {
+  std::unique_ptr<self::FunctionDef> parseFun(TokenIt &t, self::TokenView name,
+                                              self::Index &parent) {
     auto curr = self::makeExpr<self::FunctionDef>(t.coord(), name, parent);
     errReport(*t++ == "(", "\"(\" expected");
     while (*t != ")") {
@@ -848,6 +848,9 @@ struct GlobalParser {
         }
         if (type.ptr == nullptr) {
           curr->return_type.ptr = &c.void_t;
+          if (!dynamic_cast<self::Ret *>(curr->body->back().get())) {
+            curr->body->push_back(self::makeExpr<self::Ret>(t.coord()));
+          }
         } else {
           curr->return_type = type;
         }
@@ -915,7 +918,7 @@ struct GlobalParser {
         self::VarDeclarationPtr("this",
                                 self::TypeRef(str->value, self::RefTypes::ref)),
         self::VarDeclarationPtr("value", str->value), *str->value.context,
-        self::detail::assign, true));
+        self::detail::store, true));
     str->value.body.shrink_to_fit();
   }
 
@@ -961,6 +964,7 @@ struct GlobalParser {
     }
   }
 
+  // todo process qualifiers
   void process(TokenIt t, self::ExprTree &syntax_tree, self::Index &global) {
     using namespace self::reserved;
   retry:
@@ -972,7 +976,11 @@ struct GlobalParser {
         } else if (*t == fun_t) {
           auto name = *++t;
           errReport(notReserved(name), "function name is reserved");
-          syntax_tree.push_back(parseFun(++t, name, global));
+          auto f = parseFun(++t, name, global);
+          if (f->body_defined) {
+            f->qualifiers = self::Qualifiers::qExport;
+          }
+          syntax_tree.push_back(std::move(f));
         } else if (notReserved(*t)) {
           syntax_tree.push_back(parseExpr(t, global));
         } else if (*t == import_t) {
@@ -994,6 +1002,7 @@ struct GlobalParser {
   self::ExprTree process(TokenIt t, self::Index &i) {
     self::ExprTree syntax_tree;
     process(t, syntax_tree, i);
+    syntax_tree.shrink_to_fit();
     return syntax_tree;
   }
 

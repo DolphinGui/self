@@ -163,8 +163,13 @@ public:
 
     auto type =
         llvm::FunctionType::get(getType(fun.return_type), arg_types, false);
-    auto result = llvm::Function::Create(type, llvm::Function::ExternalLinkage,
-                                         fun.getForeignName(), module);
+    auto linkage = llvm::Function::LinkageTypes::PrivateLinkage;
+    if (fun.qualifiers != self::Qualifiers::qExport ||
+        fun.qualifiers != self::Qualifiers::qImport) {
+      linkage = llvm::Function::LinkageTypes::ExternalLinkage;
+    }
+    auto result =
+        llvm::Function::Create(type, linkage, fun.getForeignName(), module);
     result->setCallingConv(llvm::CallingConv::C);
     if (fun.body_defined) {
       auto block = llvm::BasicBlock::Create(llvm, "entry", result);
@@ -261,7 +266,6 @@ private:
       d.ret = generateFunCall(fun, builder);
       break;
 
-    case self::detail::assign:
     case self::detail::cmpeq:
       d.ret = builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder),
                                    dispatch(fun.rhs.get(), builder));
@@ -281,6 +285,8 @@ private:
                                   dispatch(fun.lhs.get(), builder, false));
       break;
 
+    case self::detail::assign:
+      break;
     default:
       throw std::runtime_error("This shouldn't happen");
     }
@@ -408,6 +414,12 @@ private:
     throw std::runtime_error("unimplemented right now");
   }
 
+  void operator()(const MemberDeref &deref, void *d) override {
+    auto &data = *static_cast<Params *>(d);
+
+    int i = 123;
+  }
+
   llvm::Value *generateFunCall(const self::FunctionCall &base,
                                llvm::IRBuilder<> &builder) {
     llvm::FunctionType *type;
@@ -480,8 +492,23 @@ private:
     if (t == context.str_t) {
       return str_type;
     }
+    if (auto structure = dynamic_cast<const self::StructDef *>(&t.ptr)) {
+      return makeStructType(*structure);
+    }
 
-    throw std::runtime_error("non ints not implemented right now");
+    std::string n =
+        abi::__cxa_demangle(typeid(t.ptr).name(), nullptr, nullptr, nullptr);
+    throw std::runtime_error(" not implemented right now");
+  }
+
+  llvm::StructType *makeStructType(const self::StructDef &str) {
+    std::vector<llvm::Type *> members;
+    for (auto &member : str.body) {
+      if (auto var = dynamic_cast<self::VarDeclaration *>(member.get())) {
+        members.push_back(getType(var->getDecltype()));
+      }
+    }
+    return llvm::StructType::get(llvm, members);
   }
 
   llvm::Type *getType(const self::VarDeclaration &var) {
@@ -546,6 +573,8 @@ private:
         auto ptrbits = data_layout.getPointerSizeInBits();
         return di.createPointerType(str_ditype, ptrbits);
       }
+    } else if (t.ptr == context.void_t) {
+      return nullptr;
     } else {
       return di.createBasicType(t.ptr.getTypename(), getBitsize(t),
                                 getDwarf(t));

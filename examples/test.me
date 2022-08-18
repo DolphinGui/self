@@ -1,10 +1,13 @@
 extern "C" import "../stdlib/include/io.h"
 
-var a = 12
+fun print(a: i64){
+  var b = 21
+  printnum(b)
+}
 
 fun main()->i64{
-  var a = 'hello world\n'
+  var a = 'string'
   selfprint(a)
-  printnum(a)
+  print(32)
   return 0
 }

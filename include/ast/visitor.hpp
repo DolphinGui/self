@@ -18,6 +18,7 @@ struct FloatLit;
 struct StringLit;
 struct BoolLit;
 struct StructLit;
+struct MemberDeref;
 class FunctionCall;
 // struct Literal
 struct ExprVisitor {
@@ -45,5 +46,6 @@ struct ExprVisitor {
   virtual void operator()(const BoolLit &, void *) {}
   virtual void operator()(const StructLit &, void *) {}
   virtual void operator()(const FunctionCall &, void *) {}
+  virtual void operator()(const MemberDeref&, void*){}
 };
 } // namespace self
