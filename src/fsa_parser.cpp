@@ -37,8 +37,8 @@
 #include "ffi_parse.hpp"
 #include "lexer.hpp"
 #include "literals.hpp"
-#include "pair_range.hpp"
-#include "scope_guard.hpp"
+#include "utility/pair_range.hpp"
+#include "utility/scope_guard.hpp"
 
 namespace {
 auto isInt(self::TokenView t) {
@@ -459,8 +459,7 @@ struct GlobalParser {
       }
       *it = parseSymbol(it, tree, local);
     }
-    resolveMembers(tree);
-// clang-format off
+    resolveMembers(tree); // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunused-parameter"
     for (auto it = tree.begin(); it != tree.end(); ++it) {
@@ -769,8 +768,12 @@ struct GlobalParser {
                                                std::move(condition), is_do));
   }
 
-  self::Block parseBlock(TokenIt &t, self::Index &parent) {
+  self::Block
+  parseBlock(TokenIt &t, self::Index &parent,
+             std::function<void(self::Block &)> callback = nullptr) {
     auto body = self::Block(parent);
+    if (callback)
+      callback(body);
     while (*t != "}") {
       using namespace self::reserved;
       if (*t == var_t) {
@@ -832,7 +835,11 @@ struct GlobalParser {
     }
     if (*t == "{") {
       ++t;
-      curr->body.emplace(parseBlock(t, parent));
+      curr->body.emplace(parseBlock(t, parent, [&](self::Block &b) {
+        for (auto &arg : curr->arguments) {
+          b.contexts.insert({arg->getName(), *arg});
+        }
+      }));
       curr->body_defined = true;
       if (curr->return_type.ptr == nullptr) {
         self::TypePtr type{};

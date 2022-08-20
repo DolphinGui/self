@@ -5,7 +5,7 @@
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include "lexer.hpp"
-#include "tmp_ostream.hpp"
+#include "utility/tmp_ostream.hpp"
 
 #include <algorithm>
 #include <clang/Driver/Compilation.h>

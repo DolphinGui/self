@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -30,6 +31,7 @@
 #include <llvm/IR/ValueSymbolTable.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
+#include <llvm/Support/Casting.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
@@ -52,6 +54,7 @@
 #include "ast/tuple.hpp"
 #include "ast/variables.hpp"
 #include "ast/visitor.hpp"
+#include "backend_config.hpp"
 #include "builtins.hpp"
 
 namespace {
@@ -77,26 +80,26 @@ llvm::DIType *strDI(llvm::Module &module, llvm::DIBuilder &di,
   return str;
 }
 
-llvm::GlobalVariable *createArr(llvm::Module &module,
-                                std::span<llvm::Function *> ctors,
-                                llvm::LLVMContext &llvm) {
-  auto type = llvm::StructType::get(llvm, {llvm::Type::getInt32Ty(llvm),
-                                           llvm::PointerType::get(llvm, 0),
-                                           llvm::PointerType::get(llvm, 0)});
-  auto ctor_type = llvm::ArrayType::get(type, ctors.size());
-  auto ctor_arr = std::vector<llvm::Constant *>();
-  ctor_arr.reserve(ctors.size());
-  auto ptr_type = llvm::PointerType::get(llvm, 0);
-  auto *max = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm), 65535);
-  std::ranges::for_each(ctors, [&](llvm::Function *f) {
-    ctor_arr.push_back(llvm::ConstantStruct::get(
-        type, {max, f, llvm::ConstantPointerNull::get(ptr_type)}));
-  });
-  auto global = new llvm::GlobalVariable(
-      ctor_type, true, llvm::GlobalVariable::AppendingLinkage,
-      llvm::ConstantArray::get(ctor_type, ctor_arr), "llvm.global_ctors");
-  return global;
-}
+// llvm::GlobalVariable *createArr(llvm::Module &module,
+//                                 std::span<llvm::Function *> ctors,
+//                                 llvm::LLVMContext &llvm) {
+//   auto type = llvm::StructType::get(llvm, {llvm::Type::getInt32Ty(llvm),
+//                                            llvm::PointerType::get(llvm, 0),
+//                                            llvm::PointerType::get(llvm, 0)});
+//   auto ctor_type = llvm::ArrayType::get(type, ctors.size());
+//   auto ctor_arr = std::vector<llvm::Constant *>();
+//   ctor_arr.reserve(ctors.size());
+//   auto ptr_type = llvm::PointerType::get(llvm, 0);
+//   auto *max = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm), 65535);
+//   std::ranges::for_each(ctors, [&](llvm::Function *f) {
+//     ctor_arr.push_back(llvm::ConstantStruct::get(
+//         type, {max, f, llvm::ConstantPointerNull::get(ptr_type)}));
+//   });
+//   auto global = new llvm::GlobalVariable(
+//       ctor_type, true, llvm::GlobalVariable::AppendingLinkage,
+//       llvm::ConstantArray::get(ctor_type, ctor_arr), "llvm.global_ctors");
+//   return global;
+// }
 using namespace self;
 
 // I swear this is proof c++
@@ -105,10 +108,7 @@ struct Generator : ExprVisitor {
 private:
   llvm::LLVMContext &llvm;
   self::Context &context;
-  // memory leak: vars of functions are held after the fun's done
-  // might want to pass this as a data param
-  std::unordered_map<const self::VarDeclaration *, llvm::AllocaInst *>
-      var_map{};
+
   std::unordered_map<const self::VarDeclaration *, llvm::GlobalVariable *>
       global_map{};
   std::vector<llvm::DIScope *> stack;
@@ -120,10 +120,14 @@ private:
   llvm::DIType *str_ditype;
   llvm::FunctionType *ctor_type;
   std::vector<llvm::Function *> ctor_list;
+
+  using VarMap =
+      std::unordered_map<const self::VarDeclaration *, llvm::Value *>;
   struct Params {
     const self::ExprBase *expr;
     llvm::IRBuilder<> &builder;
-    bool return_val;
+    VarMap &vars;
+    bool return_by_value;
     llvm::Value *ret = nullptr;
   };
 
@@ -149,6 +153,7 @@ public:
     str_ditype = strDI(module, di, str_type);
     ctor_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm), false);
   }
+
   void generateFun(const self::FunBase &fun) {
     auto subprogram = di.createFunction(
         file, fun.getDemangled(), fun.getForeignName(), file, fun.pos.line,
@@ -177,9 +182,16 @@ public:
       result->setSubprogram(subprogram);
       builder.SetInsertPoint(block);
       emitLocation(fun.body->pos, builder);
-
+      VarMap vars;
+      // this depends on args being stored in
+      // the same order as created
+      auto arg_val = result->args().begin();
+      fun.iterateArgs([&](const VarDeclaration &var) {
+        auto &arg = *arg_val;
+        vars.insert({&var, &arg});
+      });
       for (auto &a : *fun.body) {
-        dispatch(a.get(), builder);
+        dispatch(a.get(), builder, vars);
       }
     }
     stack.pop_back();
@@ -201,7 +213,8 @@ public:
       auto block = llvm::BasicBlock::Create(llvm, "entry", initfun);
       auto builder = llvm::IRBuilder<>(llvm);
       builder.SetInsertPoint(block);
-      builder.CreateStore(dispatch(var.value, builder), global);
+      VarMap v;
+      builder.CreateStore(dispatch(var.value, builder, v), global);
       builder.CreateRetVoid();
       ctor_list.push_back(initfun);
     }
@@ -209,8 +222,8 @@ public:
 
 private:
   llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
-                        bool return_val = true) {
-    auto passthrough = Params{expr, builder, return_val};
+                        VarMap &vars, bool return_val = true) {
+    auto passthrough = Params{expr, builder, vars, return_val};
     emitLocation(*expr, builder);
     expr->visit(*this, &passthrough);
     return passthrough.ret;
@@ -227,7 +240,7 @@ private:
     auto &d = *static_cast<Params *>(data);
     auto &builder = d.builder;
     if (ret.value) {
-      d.ret = builder.CreateRet(dispatch(ret.value.get(), builder));
+      d.ret = builder.CreateRet(dispatch(ret.value.get(), builder, d.vars));
     } else {
       d.ret = builder.CreateRetVoid();
     }
@@ -238,51 +251,53 @@ private:
     auto &builder = d.builder;
     switch (fun.getDefinition().internal) {
     case self::detail::addi:
-      d.ret = builder.CreateAdd(dispatch(fun.lhs.get(), builder),
-                                dispatch(fun.rhs.get(), builder));
+      d.ret = builder.CreateAdd(dispatch(fun.lhs.get(), builder, d.vars),
+                                dispatch(fun.rhs.get(), builder, d.vars));
       break;
 
     case self::detail::store:
-      d.ret = builder.CreateStore(dispatch(fun.rhs.get(), builder),
-                                  dispatch(fun.lhs.get(), builder, false));
+      d.ret =
+          builder.CreateStore(dispatch(fun.rhs.get(), builder, d.vars),
+                              dispatch(fun.lhs.get(), builder, d.vars, false));
       break;
 
     case self::detail::subi:
-      d.ret = builder.CreateSub(dispatch(fun.lhs.get(), builder),
-                                dispatch(fun.rhs.get(), builder));
+      d.ret = builder.CreateSub(dispatch(fun.lhs.get(), builder, d.vars),
+                                dispatch(fun.rhs.get(), builder, d.vars));
       break;
 
     case self::detail::muli:
-      d.ret = builder.CreateMul(dispatch(fun.lhs.get(), builder),
-                                dispatch(fun.rhs.get(), builder));
+      d.ret = builder.CreateMul(dispatch(fun.lhs.get(), builder, d.vars),
+                                dispatch(fun.rhs.get(), builder, d.vars));
       break;
 
     case self::detail::divi:
-      d.ret = builder.CreateSDiv(dispatch(fun.lhs.get(), builder),
-                                 dispatch(fun.rhs.get(), builder));
+      d.ret = builder.CreateSDiv(dispatch(fun.lhs.get(), builder, d.vars),
+                                 dispatch(fun.rhs.get(), builder, d.vars));
       break;
 
     case self::detail::call:
-      d.ret = generateFunCall(fun, builder);
+      d.ret = generateFunCall(fun, builder, d.vars);
       break;
 
     case self::detail::cmpeq:
-      d.ret = builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder),
-                                   dispatch(fun.rhs.get(), builder));
+      d.ret = builder.CreateICmpEQ(dispatch(fun.lhs.get(), builder, d.vars),
+                                   dispatch(fun.rhs.get(), builder, d.vars));
       break;
 
     case self::detail::cmpneq:
-      d.ret = builder.CreateICmpNE(dispatch(fun.lhs.get(), builder),
-                                   dispatch(fun.rhs.get(), builder));
+      d.ret = builder.CreateICmpNE(dispatch(fun.lhs.get(), builder, d.vars),
+                                   dispatch(fun.rhs.get(), builder, d.vars));
       break;
 
     case self::detail::addr:
-      d.ret = dispatch(fun.rhs.get(), builder, false);
+      d.ret = dispatch(fun.rhs.get(), builder, d.vars, false);
       break;
 
     case self::detail::assignaddr:
-      d.ret = builder.CreateStore(dispatch(fun.rhs.get(), builder, false),
-                                  dispatch(fun.lhs.get(), builder, false));
+      d.ret =
+          builder.CreateStore(dispatch(fun.rhs.get(), builder, d.vars, false),
+                              dispatch(fun.lhs.get(), builder, d.vars, false));
       break;
 
     case self::detail::assign:
@@ -330,7 +345,7 @@ private:
     auto line = var.pos.line, col = var.pos.col;
     auto result =
         d.builder.CreateAlloca(getType(var), 0, var.getDemangledName());
-    var_map.insert({&var, result});
+    d.vars.insert({&var, result});
     if (auto back = sp()) {
       auto n = di.createAutoVariable(back, var.getDemangledName(), file, line,
                                      getDIType(var.getDecltype()));
@@ -343,16 +358,21 @@ private:
 
   void operator()(const VarDeref &var, void *data) override {
     auto &d = *static_cast<Params *>(data);
-    auto result = var_map.at(&var.definition);
+    auto result = d.vars.at(&var.definition);
     if (var.definition.getDecltype().depth > 0) {
       auto load = d.builder.CreateLoad(llvm::PointerType::get(llvm, 0), result);
       d.ret = load;
       return;
     }
-    if (!d.return_val) {
+    if (d.return_by_value) {
+      if (auto alloca_inst = llvm::dyn_cast<llvm::AllocaInst>(result)) {
+        d.ret = d.builder.CreateLoad(alloca_inst->getAllocatedType(), result);
+        return;
+      }
       d.ret = result;
     } else {
-      d.ret = d.builder.CreateLoad(result->getAllocatedType(), result);
+      assert(llvm::isa<llvm::AllocaInst>(result));
+      d.ret = result;
     }
   }
 
@@ -368,11 +388,11 @@ private:
     } else {
       else_block = cont_block;
     }
-    builder.CreateCondBr(dispatch(if_e.condition.get(), builder), then_block,
-                         else_block);
+    builder.CreateCondBr(dispatch(if_e.condition.get(), builder, d.vars),
+                         then_block, else_block);
     builder.SetInsertPoint(then_block);
     for (auto &e : *if_e.block) {
-      dispatch(e.get(), builder);
+      dispatch(e.get(), builder, d.vars);
     }
     builder.CreateBr(cont_block);
     function->getBasicBlockList().push_back(else_block);
@@ -380,7 +400,7 @@ private:
     if (else_block != cont_block) {
       builder.SetInsertPoint(else_block);
       for (auto &e : *if_e.else_block) {
-        dispatch(e.get(), builder);
+        dispatch(e.get(), builder, d.vars);
       }
       builder.CreateBr(cont_block);
     }
@@ -400,15 +420,15 @@ private:
     if (while_e.is_do) {
       builder.CreateBr(loop);
     } else {
-      builder.CreateCondBr(dispatch(while_e.condition.get(), builder), loop,
-                           cont_block);
+      builder.CreateCondBr(dispatch(while_e.condition.get(), builder, d.vars),
+                           loop, cont_block);
     }
     builder.SetInsertPoint(loop);
     for (auto &e : *while_e.block) {
-      dispatch(e.get(), builder);
+      dispatch(e.get(), builder, d.vars);
     }
-    builder.CreateCondBr(dispatch(while_e.condition.get(), builder), loop,
-                         cont_block);
+    builder.CreateCondBr(dispatch(while_e.condition.get(), builder, d.vars),
+                         loop, cont_block);
     function->getBasicBlockList().push_back(cont_block);
     builder.SetInsertPoint(cont_block);
     throw std::runtime_error("unimplemented right now");
@@ -421,7 +441,7 @@ private:
   }
 
   llvm::Value *generateFunCall(const self::FunctionCall &base,
-                               llvm::IRBuilder<> &builder) {
+                               llvm::IRBuilder<> &builder, VarMap &v) {
     llvm::FunctionType *type;
     {
       std::vector<llvm::Type *> arg_types;
@@ -440,11 +460,12 @@ private:
     std::vector<llvm::Value *> args;
     args.reserve(base.definition.argcount());
     forEachArg(base, [&](const self::ExprBase &e) {
-      args.push_back(
-          dispatch(&e, builder, e.getType().is_ref == self::RefTypes::value));
+      args.push_back(dispatch(&e, builder, v,
+                              e.getType().is_ref == self::RefTypes::value));
     });
     return builder.CreateCall(callee, args);
   }
+
   void unpackArgs(self::ExprBase *e, auto unary) {
     if (auto *args = dynamic_cast<self::ArgPack *>(e)) {
       for (auto &arg : args->members) {
@@ -454,6 +475,7 @@ private:
       unary(*e);
     }
   }
+
   void forEachArg(const self::FunctionCall &base, auto unary) {
     if (base.isBinary()) {
       unpackArgs(base.lhs.get(), unary);
@@ -464,6 +486,7 @@ private:
       throw std::runtime_error("unimplemented");
     }
   }
+
   void forEachArg(const self::FunBase &def, auto unary) {
     if (auto *fun = dynamic_cast<const self::FunctionDef *>(&def)) {
       std::for_each(fun->arguments.begin(), fun->arguments.end(), unary);
@@ -473,6 +496,7 @@ private:
       unary(op.rhs);
     }
   }
+
   llvm::Type *getType(self::TypeRef t) {
     if (t.is_ref == self::RefTypes::ref) {
       return llvm::PointerType::get(llvm, 0);

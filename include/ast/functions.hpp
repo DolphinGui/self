@@ -77,6 +77,8 @@ public:
     else
       return foreign_name;
   }
+  virtual void
+  iterateArgs(std::function<void(const VarDeclaration &)> callback) const = 0;
 };
 
 class OperatorDef : public FunBase, public NameMangling<OperatorDef> {
@@ -124,6 +126,11 @@ public:
   }
   constexpr static auto prefix = "__operator_";
   Token getDemangled() const override { return getDemangledName(); }
+  void iterateArgs(
+      std::function<void(const VarDeclaration &)> callback) const override {
+    callback(*rhs);
+    callback(*lhs);
+  }
 };
 
 struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
@@ -179,6 +186,12 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   }
   constexpr static auto prefix = "__function_";
   Token getDemangled() const override { return getDemangledName(); }
+  void iterateArgs(
+      std::function<void(const VarDeclaration &)> callback) const override {
+    for (auto &arg : arguments) {
+      callback(*arg);
+    }
+  }
 };
 
 class FunctionCall : public ExprImpl<FunctionCall> {

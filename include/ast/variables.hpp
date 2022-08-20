@@ -16,7 +16,7 @@ class VarDeclaration : public ExprImpl<VarDeclaration>,
 
 public:
   TypePtr type_ref;
-  ExprBase *value;
+  ExprBase *value = nullptr;
   VarDeclaration(TokenView name) : name(mangle(name)), type_ref{nullptr} {}
   VarDeclaration(TokenView name, TypeRef type)
       : name(mangle(name)), type_ref{&type.ptr, type.is_ref} {}
