@@ -47,24 +47,28 @@ struct StructDef : public ExprImpl<StructDef>, Type {
   TokenView getTypename() const noexcept override { return identity; }
 };
 struct MemberDeref : public ExprImpl<MemberDeref> {
+  // the member being dereferenced
   VarDeclaration &definition;
+  // the dereferenced structure
   std::unique_ptr<VarDeref> structure;
-  std::string_view name;
+  const StructDef &type;
 
-  MemberDeref(VarDeclaration &definition, std::unique_ptr<VarDeref> &&structure)
-      : definition(definition), structure(std::move(structure)),
-        name(definition.getName()) {}
+  MemberDeref(VarDeclaration &definition, std::unique_ptr<VarDeref> &&structure,
+              const StructDef &type)
+      : definition(definition), structure(std::move(structure)), type(type) {}
 
   MemberDeref(const MemberDeref &other)
       : definition(other.definition),
         structure(std::make_unique<VarDeref>(*other.structure)),
-        name(other.name) {}
+        type(other.type) {}
 
   inline std::ostream &print(std::ostream &out) const override {
     return out << "member dereference: " << definition;
   }
 
-  inline std::string_view getName() const noexcept override { return name; }
+  inline std::string_view getName() const noexcept override {
+    return definition.getName();
+  }
 
   virtual TypePtr getType() const noexcept override {
     return definition.getType();

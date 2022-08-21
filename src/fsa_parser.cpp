@@ -416,7 +416,7 @@ struct GlobalParser {
           auto structure = upCast<self::VarDeref>(std::move(*behind));
           auto &var = dynamic_cast<self::VarDeclaration &>(v->get());
           self::ExprPtr n = self::makeExpr<self::MemberDeref>(
-              ahead_pos, var, std::move(structure));
+              ahead_pos, var, std::move(structure), struct_def);
           behind->swap(n);
         } else if (auto f = struct_def.context->findLocally(
                        self::FunctionDef::qualify(ahead_token))) {

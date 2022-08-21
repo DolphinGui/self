@@ -406,6 +406,7 @@ private:
   void operator()(const VarDeref &var, void *data) override {
     auto &d = *static_cast<Params *>(data);
     auto result = d.vars.at(&var.definition);
+    // not sure if this is strictly necessary
     if (var.definition.getDecltype().depth > 0) {
       auto load = d.builder.CreateLoad(llvm::PointerType::get(llvm, 0), result);
       d.ret = load;
@@ -480,11 +481,44 @@ private:
     builder.SetInsertPoint(cont_block);
     throw std::runtime_error("unimplemented right now");
   }
-  // todo not done yet
-  void operator()(const MemberDeref &deref, void *d) override {
-    auto &data = *static_cast<Params *>(d);
 
-    int i = 123;
+  static size_t getElementIndex(const StructDef &def,
+                                const VarDeclaration &member) {
+    size_t result = 0;
+    for (const auto &m : def.body) {
+      if (auto var = dynamic_cast<const self::VarDeclaration *const>(m.get())) {
+        if (&member == var) {
+          return result;
+        }
+        result++;
+      }
+    }
+    throw std::runtime_error("member not found");
+  }
+
+  // todo make this work for struct params
+  void operator()(const MemberDeref &deref, void *d) override {
+    auto &params = *static_cast<Params *>(d);
+    auto result = params.vars.at(&deref.structure.get()->definition);
+    auto type = getType(deref.type);
+    auto index = getElementIndex(deref.type, deref.definition);
+    auto ptr = params.builder.CreateStructGEP(type, result, index);
+    if (deref.definition.getDecltype().depth > 0) {
+      params.ret = ptr;
+      return;
+    }
+    if (params.return_by_value) {
+      if (auto alloca_inst = llvm::dyn_cast<llvm::AllocaInst>(result)) {
+        params.ret =
+            params.builder.CreateLoad(type->getStructElementType(index), ptr);
+        return;
+      }
+      // todo:
+      throw std::runtime_error("literal struct dereferences not done yet");
+    } else {
+      assert(llvm::isa<llvm::AllocaInst>(result));
+      params.ret = ptr;
+    }
   }
 
   llvm::Value *generateFunCall(const self::FunctionCall &base,
