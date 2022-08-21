@@ -19,6 +19,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+
 constexpr auto path = "a.o";
 constexpr auto output_name = "a.out";
 // this is not crossplatform in the slightest.
@@ -59,7 +60,11 @@ int main() {
   auto f = readFile();
   auto AST = self::parseFile(f, c);
   std::cout << AST.ast;
-  auto [IR, di] = self::codegen(AST.ast, c, llvm, "../examples/test.me");
+  if (!AST.errs.errors.empty()) {
+    std::cerr << AST.errs << '\n';
+    std::exit(0);
+  }
+  auto [IR, di] = self::codegen(AST, c, llvm, "../examples/test.me");
   std::error_code file_err;
   IR->print(llvm::outs(), nullptr);
   auto aout = llvm::raw_fd_ostream(path, file_err);

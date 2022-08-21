@@ -42,7 +42,7 @@ struct FunBase : public ExprBase {
   detail::BuiltinInstruction internal;
   bool member = false;
   bool body_defined = false;
-  virtual Token getDemangled() const = 0;
+  virtual Token getDequalified() const = 0;
 
 protected:
   FunBase(TokenView name, Index &parent, bool member = false)
@@ -81,7 +81,7 @@ public:
   iterateArgs(std::function<void(const VarDeclaration &)> callback) const = 0;
 };
 
-class OperatorDef : public FunBase, public NameMangling<OperatorDef> {
+class OperatorDef : public FunBase, public NameQualification<OperatorDef> {
 public:
   std::unique_ptr<VarDeclaration> lhs;
   std::unique_ptr<VarDeclaration> rhs;
@@ -90,7 +90,7 @@ public:
               std::unique_ptr<VarDeclaration> &&RHS, Index &parent,
               detail::BuiltinInstruction internal = detail::call,
               bool member = false)
-      : FunBase(mangle(name), return_type, parent, member, internal),
+      : FunBase(qualify(name), return_type, parent, member, internal),
         lhs(std::move(LHS)), rhs(std::move(RHS)) {}
   OperatorDef(const OperatorDef &other)
       : FunBase(other), lhs(std::make_unique<VarDeclaration>(*other.lhs)),
@@ -101,7 +101,7 @@ public:
     return 2;
   }
   std::ostream &print(std::ostream &out) const override {
-    out << "operator " << demangle(name) << "( ";
+    out << "operator " << dequalify(name) << "( ";
     if (lhs) {
       out << *lhs << ", ";
     }
@@ -125,7 +125,7 @@ public:
     visitor(*this, d);
   }
   constexpr static auto prefix = "__operator_";
-  Token getDemangled() const override { return getDemangledName(); }
+  Token getDequalified() const override { return getRawName(); }
   void iterateArgs(
       std::function<void(const VarDeclaration &)> callback) const override {
     callback(*rhs);
@@ -133,13 +133,13 @@ public:
   }
 };
 
-struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
+struct FunctionDef : public FunBase, public NameQualification<FunctionDef> {
   std::vector<std::unique_ptr<VarDeclaration>> arguments;
   FunctionDef(TokenView name, Index &parent, bool member = false)
-      : FunBase(mangle(name), parent, member) {}
+      : FunBase(qualify(name), parent, member) {}
   FunctionDef(TokenView name, Index &parent, TypeRef return_type,
               bool member = false, auto &&...args)
-      : FunBase(mangle(name), return_type, parent, member, detail::call) {
+      : FunBase(qualify(name), return_type, parent, member, detail::call) {
     arguments.reserve(sizeof...(args));
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
                     std::move(args)...);
@@ -147,11 +147,11 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   FunctionDef(TokenView name, Index &parent, TypeRef return_type,
               bool member = false,
               std::vector<std::unique_ptr<VarDeclaration>> &&args = {})
-      : FunBase(mangle(name), return_type, parent, member, detail::call),
+      : FunBase(qualify(name), return_type, parent, member, detail::call),
         arguments(std::move(args)) {}
   FunctionDef(detail::BuiltinInstruction b, TokenView name, Index &parent,
               TypeRef return_type, bool member = false, auto &&...args)
-      : FunBase(mangle(name), return_type, parent, member, detail::call) {
+      : FunBase(qualify(name), return_type, parent, member, detail::call) {
     internal = b;
     arguments.reserve(sizeof...(args));
     detail::iterate([&](auto &&arg) { arguments.push_back(std::move(arg)); },
@@ -171,7 +171,7 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
   }
   std::size_t argcount() const noexcept override { return arguments.size(); }
   std::ostream &print(std::ostream &out) const override {
-    out << "fun " << demangle(name) << "( ";
+    out << "fun " << dequalify(name) << "( ";
     for (const auto &arg : arguments) {
       out << *arg << ", ";
     }
@@ -185,7 +185,7 @@ struct FunctionDef : public FunBase, public NameMangling<FunctionDef> {
     return out;
   }
   constexpr static auto prefix = "__function_";
-  Token getDemangled() const override { return getDemangledName(); }
+  Token getDequalified() const override { return getRawName(); }
   void iterateArgs(
       std::function<void(const VarDeclaration &)> callback) const override {
     for (auto &arg : arguments) {
@@ -208,9 +208,8 @@ public:
   inline std::ostream &print(std::ostream &out) const override {
     if (lhs)
       out << *lhs << ' ';
-    out << definition.getDemangled() << ' ';
-    if (rhs)
-      out << *rhs;
+    out << definition.getDequalified() << ' ';
+    out << *rhs;
     return out;
   }
   bool isComplete() const noexcept override {

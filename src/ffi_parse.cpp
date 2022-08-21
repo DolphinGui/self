@@ -7,7 +7,6 @@
 #include "ast/variables.hpp"
 
 #include <clang-c/Index.h>
-#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string_view>

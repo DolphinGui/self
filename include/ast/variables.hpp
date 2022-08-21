@@ -11,21 +11,21 @@
 namespace self {
 
 class VarDeclaration : public ExprImpl<VarDeclaration>,
-                       public NameMangling<VarDeclaration> {
+                       public NameQualification<VarDeclaration> {
   Token name;
 
 public:
   TypePtr type_ref;
   ExprBase *value = nullptr;
-  VarDeclaration(TokenView name) : name(mangle(name)), type_ref{nullptr} {}
+  VarDeclaration(TokenView name) : name(qualify(name)), type_ref{nullptr} {}
   VarDeclaration(TokenView name, TypeRef type)
-      : name(mangle(name)), type_ref{&type.ptr, type.is_ref} {}
+      : name(qualify(name)), type_ref{&type.ptr, type.is_ref} {}
 
   inline std::ostream &print(std::ostream &out) const override {
     if (type_ref.ptr)
-      return out << "var " << demangle(name) << ": " << type_ref.dump();
+      return out << "var " << dequalify(name) << ": " << type_ref.dump();
     else
-      return out << "var  " << demangle(name);
+      return out << "var  " << dequalify(name);
   }
 
   TypePtr getType() const noexcept override {

@@ -5,7 +5,6 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -167,7 +166,7 @@ struct ErrException {
 
 bool coerceType(self::ExprPtr &e, self::TypePtr type) {
   if (auto *var = dynamic_cast<self::VarDeclaration *>(e.get())) {
-    auto t = var->getDemangledName();
+    auto t = var->getRawName();
     if (!var->type_ref.ptr) {
       var->type_ref = type;
       if (type.depth == 0)
@@ -202,10 +201,10 @@ void for_tuple(self::ExprPtr &e, auto unary) {
 
 void for_tuple(self::ExprPtr &left, auto gen, auto binary) {
   if (auto *tuple = dynamic_cast<self::Tuple *>(left.get())) {
-    for (auto l = tuple->members.begin(); l != tuple->members.end(); ++l) {
-      binary(*l, gen());
+    for (auto member = tuple->members.begin(); member != tuple->members.end();
+         ++member) {
+      binary(*member, gen());
     }
-    throw std::runtime_error("for tuple mismatch");
   } else
     binary(left, gen());
 }
@@ -257,6 +256,7 @@ struct GlobalParser {
   using TypeList = std::unordered_map<self::TokenView, self::TypeRef>;
   self::Context &c;
   self::ErrorList &err;
+  std::vector<const self::StructDef *> &struct_list;
 
   void errReport(bool condition, std::string_view message) {
     if (!condition) {
@@ -363,13 +363,13 @@ struct GlobalParser {
           }
         }
       };
-      search(self::pairRange(context.equalRange(T::mangle(t->getToken()))));
+      search(self::pairRange(context.equalRange(T::qualify(t->getToken()))));
       // argument dependent lookup
       for (auto &hs : {lhs, rhs}) {
         if (auto *str = dynamic_cast<const self::StructDef *>(
                 hs->get()->getType().ptr)) {
           search(self::pairRange(
-              str->context->localEqualRange(T::mangle(t->getToken()))));
+              str->context->localEqualRange(T::qualify(t->getToken()))));
         }
       }
       if (!no_coerce.empty()) {
@@ -411,7 +411,7 @@ struct GlobalParser {
             **ahead, "Unknown parsing error: Uneval expected");
         auto ahead_token = ahead_e.getToken();
         auto ahead_pos = ahead->get()->pos;
-        auto n = self::VarDeclaration::mangle(ahead_token);
+        auto n = self::VarDeclaration::qualify(ahead_token);
         if (auto v = struct_def.context->findLocally(n)) {
           auto structure = upCast<self::VarDeref>(std::move(*behind));
           auto &var = dynamic_cast<self::VarDeclaration &>(v->get());
@@ -419,9 +419,9 @@ struct GlobalParser {
               ahead_pos, var, std::move(structure));
           behind->swap(n);
         } else if (auto f = struct_def.context->findLocally(
-                       self::FunctionDef::mangle(ahead_token))) {
+                       self::FunctionDef::qualify(ahead_token))) {
           auto &fun = dynamic_cast<self::FunctionDef &>(v->get());
-          errReport(fun.arguments.front()->getDemangledName() == "this",
+          errReport(fun.arguments.front()->getRawName() == "this",
                     "Object-oriented-style function calls require 'this' "
                     "parameter as first parameter");
           auto arg_list = self::makeExpr<self::ArgPack>(ahead->get()->pos);
@@ -556,30 +556,39 @@ struct GlobalParser {
     return std::move(tree.back());
   }
 
+  // maybe reuse this?
+  void tryCoerceFun(auto &args, auto &ctor, auto end, auto arg_it,
+                    auto &perfect, auto &coerced) {
+    for (auto arg : args) {
+      if (arg_it == end)
+        return;
+      auto type = arg_it->get()->getDecltype();
+      if (auto r = needCoerce(arg, type); r == coerceResult::mismatch)
+        return;
+      else {
+        if (r == coerceResult::match) {
+          perfect.push_back(&ctor);
+          return;
+        } else {
+          coerced.push_back(&ctor);
+          return;
+        }
+      }
+    }
+  }
+
   self::FunctionDef *findCtor(self::StructDef &structure,
                               std::span<self::ExprBase *> args) {
-    auto candidates =
-        structure.context->localEqualRange(self::FunctionDef::mangle("struct"));
+    auto candidates = structure.context->localEqualRange(
+        self::FunctionDef::qualify("struct"));
     std::vector<self::FunctionDef *> perfect;
     std::vector<self::FunctionDef *> coerced;
     for (auto &[_, f] : self::pairRange(candidates)) {
       auto &ctor = dynamic_cast<self::FunctionDef &>(f.get());
       if (ctor.argcount() != args.size())
         continue;
-      auto arg_it = ctor.arguments.begin();
-      for (auto arg : args) {
-        if (arg_it == ctor.arguments.end())
-          continue;
-        auto type = arg_it->get()->getDecltype();
-        if (auto r = needCoerce(arg, type); r == coerceResult::mismatch)
-          continue;
-        else {
-          if (r == coerceResult::match)
-            perfect.push_back(&ctor);
-          else
-            coerced.push_back(&ctor);
-        }
-      }
+      tryCoerceFun(args, ctor, ctor.arguments.end(), ctor.arguments.begin(),
+                   perfect, coerced);
     }
     if (!perfect.empty()) {
       errReport(perfect.size() == 1, "ambiguous constructor call");
@@ -617,6 +626,7 @@ struct GlobalParser {
         coerceType(*arg, decl->get()->getDecltype());
         ++decl, ++arg;
       }
+      *next = std::move(arg_pack);
     } else {
       return self::makeExpr<self::VarDeref>(pos, var);
     }
@@ -640,7 +650,7 @@ struct GlobalParser {
       } else if (self::BuiltinTypeLit::contains(t, c)) {
         return self::makeExpr<self::BuiltinTypeLit>(
             pos, self::BuiltinTypeLit::get(t, c));
-      } else if (auto varname = self::VarDeclaration::mangle(t);
+      } else if (auto varname = self::VarDeclaration::qualify(t);
                  local.contains(varname)) {
         errReport(local.isUnique(varname), "ODR var declaration rule violated");
         auto &var =
@@ -867,7 +877,14 @@ struct GlobalParser {
     return curr;
   }
 
-  self::ExprPtr parseStruct(TokenIt &t, self::Index &parent) {
+  std::unique_ptr<self::StructLit> parseStruct(TokenIt &t,
+                                               self::Index &parent) {
+    auto str = makeStruct(t, parent);
+    struct_list.push_back(&str->value);
+    return str;
+  }
+
+  std::unique_ptr<self::StructLit> makeStruct(TokenIt &t, self::Index &parent) {
     static unsigned int id = 0;
     auto identity = std::string("struct");
     identity.append(std::to_string(id++));
@@ -877,11 +894,13 @@ struct GlobalParser {
       ++t;
       if (*t == ")") {
         ++t;
-        return self::makeExpr<self::StructDef>(p, 0, parent);
+        return self::makeExpr<self::StructLit>(p, self::StructDef(0, parent),
+                                               c);
       } else {
         auto [success, size] = isInt(*t++);
         errReport(success, "Expected integer or \")\"");
-        return self::makeExpr<self::StructDef>(p, size, parent);
+        return self::makeExpr<self::StructLit>(p, self::StructDef(size, parent),
+                                               c);
       }
     } else {
       auto result = self::StructDef(parent);
@@ -1013,16 +1032,19 @@ struct GlobalParser {
     return syntax_tree;
   }
 
-  GlobalParser(self::Context &c, self::ErrorList &e) : c(c), err(e) {}
+  GlobalParser(self::Context &c, self::ErrorList &e,
+               std::vector<const self::StructDef *> &list)
+      : c(c), err(e), struct_list(list) {}
 };
 } // namespace
 
 namespace self {
 Module parse(LexedFileRef &in, Context &c) {
   ErrorList e;
-  auto parser = GlobalParser(c, e);
+  std::vector<const self::StructDef *> list;
+  auto parser = GlobalParser(c, e, list);
   auto root = Index(c.root);
   auto ast = parser.process(TokenIt{in}, root);
-  return Module(std::move(root), std::move(ast), std::move(e));
+  return Module(std::move(root), std::move(ast), std::move(e), std::move(list));
 }
 } // namespace self

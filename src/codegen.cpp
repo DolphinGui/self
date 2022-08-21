@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <iostream>
 #include <iterator>
 #include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
@@ -25,6 +24,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
@@ -40,6 +40,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -120,6 +121,8 @@ private:
   llvm::DIType *str_ditype;
   llvm::FunctionType *ctor_type;
   std::vector<llvm::Function *> ctor_list;
+  std::unordered_map<const self::StructDef *, llvm::StructType *> struct_map;
+  std::unordered_map<const self::FunBase *, llvm::Function *> fun_map;
 
   using VarMap =
       std::unordered_map<const self::VarDeclaration *, llvm::Value *>;
@@ -140,7 +143,8 @@ private:
 
 public:
   Generator(Context &c, llvm::LLVMContext &context, llvm::Module &m,
-            llvm::DIBuilder &di, std::filesystem::path filepath)
+            llvm::DIBuilder &di, std::filesystem::path filepath,
+            std::span<const self::StructDef *const> struct_list)
       : llvm(context), context(c), module(m), di(di),
         str_type(
             llvm::StructType::get(context, {llvm::PointerType::get(context, 0),
@@ -152,50 +156,13 @@ public:
     stack.push_back(compile_unit);
     str_ditype = strDI(module, di, str_type);
     ctor_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm), false);
+    for (const auto str : struct_list) {
+      makeStructType(*str);
+    }
   }
 
   void generateFun(const self::FunBase &fun) {
-    auto subprogram = di.createFunction(
-        file, fun.getDemangled(), fun.getForeignName(), file, fun.pos.line,
-        createFunDebugType(fun), fun.pos.line, llvm::DINode::FlagPrototyped,
-        llvm::DISubprogram::SPFlagDefinition);
-    stack.push_back(subprogram);
-    std::vector<llvm::Type *> arg_types;
-    arg_types.reserve(fun.argcount());
-    forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
-      arg_types.push_back(getType(*a));
-    });
-
-    auto type =
-        llvm::FunctionType::get(getType(fun.return_type), arg_types, false);
-    auto linkage = llvm::Function::LinkageTypes::PrivateLinkage;
-    if (fun.qualifiers != self::Qualifiers::qExport ||
-        fun.qualifiers != self::Qualifiers::qImport) {
-      linkage = llvm::Function::LinkageTypes::ExternalLinkage;
-    }
-    auto result =
-        llvm::Function::Create(type, linkage, fun.getForeignName(), module);
-    result->setCallingConv(llvm::CallingConv::C);
-    if (fun.body_defined) {
-      auto block = llvm::BasicBlock::Create(llvm, "entry", result);
-      auto builder = llvm::IRBuilder<>(llvm);
-      result->setSubprogram(subprogram);
-      builder.SetInsertPoint(block);
-      emitLocation(fun.body->pos, builder);
-      VarMap vars;
-      // this depends on args being stored in
-      // the same order as created
-      auto arg_val = result->args().begin();
-      fun.iterateArgs([&](const VarDeclaration &var) {
-        auto &arg = *arg_val;
-        vars.insert({&var, &arg});
-      });
-      for (auto &a : *fun.body) {
-        dispatch(a.get(), builder, vars);
-      }
-    }
-    stack.pop_back();
-    di.finalizeSubprogram(subprogram);
+    createFun(fun, fun.getForeignName());
   }
 
   void generateGlobal(const self::VarDeclaration &var) {
@@ -204,7 +171,7 @@ public:
     }
     auto global = new llvm::GlobalVariable(module, getType(var), false,
                                            llvm::GlobalVariable::PrivateLinkage,
-                                           nullptr, var.getDemangledName());
+                                           nullptr, var.getRawName());
     global_map.insert({&var, global});
     global->setInitializer(getZeroed(var.getDecltype()));
     if (var.value) {
@@ -221,6 +188,86 @@ public:
   }
 
 private:
+  // explicit return type is for breaking a dependency loop
+  // when lazily evaluating constructors
+  void createFun(const self::FunBase &fun, std::string_view foreign,
+                 llvm::Type *return_type = nullptr) {
+    std::vector<llvm::Type *> arg_types;
+    arg_types.reserve(fun.argcount());
+    forEachArg(fun, [&](const std::unique_ptr<self::VarDeclaration> &a) {
+      arg_types.push_back(getType(*a));
+    });
+    if (!return_type) {
+      return_type = getType(fun.return_type);
+    }
+    auto type = llvm::FunctionType::get(return_type, arg_types, false);
+    auto linkage = llvm::Function::LinkageTypes::InternalLinkage;
+    if (fun.isExternal()) {
+      linkage = llvm::Function::LinkageTypes::ExternalLinkage;
+    }
+    auto result = llvm::Function::Create(type, linkage, foreign, module);
+    result->setCallingConv(llvm::CallingConv::C);
+
+    // if it is neither defined internally nor externally, it must
+    // be a compiler generated function
+    if (!fun.body_defined && !fun.isExternal()) {
+      createDefaultedFunction(fun, result);
+    } else if (fun.body_defined) {
+      auto subprogram = di.createFunction(
+          file, fun.getDequalified(), foreign, file, fun.pos.line,
+          createFunDebugType(fun), fun.pos.line, llvm::DINode::FlagPrototyped,
+          llvm::DISubprogram::SPFlagDefinition);
+      stack.push_back(subprogram);
+      auto block = llvm::BasicBlock::Create(llvm, "entry", result);
+      auto builder = llvm::IRBuilder<>(llvm);
+      result->setSubprogram(subprogram);
+      builder.SetInsertPoint(block);
+      emitLocation(fun.body->pos, builder);
+      VarMap vars;
+      // this depends on args being stored in
+      // the same order as created
+      auto arg_val = result->args().begin();
+      fun.iterateArgs([&](const VarDeclaration &var) {
+        auto &arg = *arg_val;
+        vars.insert({&var, &arg});
+      });
+      for (auto &a : *fun.body) {
+        dispatch(a.get(), builder, vars);
+      }
+      stack.pop_back();
+      di.finalizeSubprogram(subprogram);
+    }
+    fun_map.insert({&fun, result});
+  }
+
+  // only generates code
+  void createDefaultedFunction(const self::FunBase &fun,
+                               llvm::Function *result) {
+    auto name = fun.getDequalified();
+    auto block = llvm::BasicBlock::Create(llvm, "entry", result);
+    auto builder = llvm::IRBuilder<>(llvm);
+    builder.SetInsertPoint(block);
+    if (name == "struct") {
+      std::vector<llvm::Value *> args;
+      args.reserve(fun.argcount());
+      for (auto &arg : result->args()) {
+        args.push_back(&arg);
+      }
+      auto ret_type = result->getReturnType();
+      auto alloca = builder.CreateAlloca(ret_type);
+      int i = 0;
+      for (auto *arg : args) {
+        auto element = builder.CreateStructGEP(ret_type, alloca, i++);
+        builder.CreateStore(arg, element);
+      }
+      auto ret_value = builder.CreateLoad(ret_type, alloca);
+      builder.CreateRet(ret_value);
+    } else if (name == "=") {
+      builder.CreateStore(result->getArg(1), result->getArg(0));
+      builder.CreateRet(result->getArg(0));
+    }
+  }
+
   llvm::Value *dispatch(const self::ExprBase *expr, llvm::IRBuilder<> &builder,
                         VarMap &vars, bool return_val = true) {
     auto passthrough = Params{expr, builder, vars, return_val};
@@ -229,10 +276,11 @@ private:
     return passthrough.ret;
   }
 
+  // todo throw typeid
   void operator()(const ExprBase &expr, void *data) override {
-    auto &type = typeid(expr);
-    std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
-              << '\n';
+    // auto &type = typeid(expr);
+    // std::cerr << abi::__cxa_demangle(type.name(), nullptr, nullptr, nullptr)
+    //           << '\n';
     throw std::runtime_error("I dont know what type this is\n");
   }
 
@@ -343,11 +391,10 @@ private:
   void operator()(const VarDeclaration &var, void *data) override {
     auto &d = *static_cast<Params *>(data);
     auto line = var.pos.line, col = var.pos.col;
-    auto result =
-        d.builder.CreateAlloca(getType(var), 0, var.getDemangledName());
+    auto result = d.builder.CreateAlloca(getType(var), 0, var.getRawName());
     d.vars.insert({&var, result});
     if (auto back = sp()) {
-      auto n = di.createAutoVariable(back, var.getDemangledName(), file, line,
+      auto n = di.createAutoVariable(back, var.getRawName(), file, line,
                                      getDIType(var.getDecltype()));
       di.insertDeclare(result, n, di.createExpression(),
                        llvm::DILocation::get(llvm, line, col, back),
@@ -433,7 +480,7 @@ private:
     builder.SetInsertPoint(cont_block);
     throw std::runtime_error("unimplemented right now");
   }
-
+  // todo not done yet
   void operator()(const MemberDeref &deref, void *d) override {
     auto &data = *static_cast<Params *>(d);
 
@@ -455,7 +502,7 @@ private:
                                      arg_types, false);
     }
     auto &table = builder.GetInsertBlock()->getModule()->getValueSymbolTable();
-    auto *val = table.lookup(base.definition.getForeignName());
+    auto *val = fun_map.at(&base.getDefinition());
     auto callee = llvm::FunctionCallee(type, val);
     std::vector<llvm::Value *> args;
     args.reserve(base.definition.argcount());
@@ -517,7 +564,7 @@ private:
       return str_type;
     }
     if (auto structure = dynamic_cast<const self::StructDef *>(&t.ptr)) {
-      return makeStructType(*structure);
+      return struct_map.at(structure);
     }
 
     std::string n =
@@ -525,18 +572,29 @@ private:
     throw std::runtime_error(" not implemented right now");
   }
 
-  llvm::StructType *makeStructType(const self::StructDef &str) {
-    std::vector<llvm::Type *> members;
-    for (auto &member : str.body) {
-      if (auto var = dynamic_cast<self::VarDeclaration *>(member.get())) {
-        members.push_back(getType(var->getDecltype()));
-      }
-    }
-    return llvm::StructType::get(llvm, members);
-  }
-
   llvm::Type *getType(const self::VarDeclaration &var) {
     return getType(var.getDecltype());
+  }
+
+  void makeStructType(const self::StructDef &str) {
+    std::vector<llvm::Type *> members;
+    std::vector<const self::FunBase *> functions;
+    members.reserve(str.body.size());
+    functions.reserve(str.body.size());
+    for (const auto &member : str.body) {
+      if (auto var = dynamic_cast<const self::VarDeclaration *>(member.get())) {
+        members.push_back(getType(var->getDecltype()));
+      } else if (auto fun = dynamic_cast<const self::FunBase *>(member.get())) {
+        functions.push_back(fun);
+      }
+    }
+    members.shrink_to_fit();
+    functions.shrink_to_fit();
+    auto type = llvm::StructType::get(llvm, members);
+    struct_map.insert({&str, type});
+    for (const auto fun : functions) {
+      generateFun(*fun);
+    }
   }
 
   void emitLocation(Pos pos, llvm::IRBuilder<> &builder) {
@@ -588,7 +646,29 @@ private:
 
   llvm::DIType *getDIType(self::TypeRef t) {
     if (auto *n = dynamic_cast<const StructDef *>(&t.ptr)) {
-      throw std::runtime_error("I'll implement debug info for structs later");
+      auto layout = module.getDataLayout().getStructLayout(
+          llvm::cast<llvm::StructType>(struct_map.at(n)));
+      // assumes 8 bit bytes
+      auto alignment = layout->getAlignment().value() * 8;
+      llvm::DIBuilder *d;
+      std::vector<llvm::Metadata *> elements;
+      elements.reserve(n->body.size());
+      for (auto &member : n->body) {
+        if (auto var =
+                dynamic_cast<const self::VarDeclaration *>(member.get())) {
+          elements.push_back(getDIType(var->getDecltype()));
+        }
+      }
+      elements.shrink_to_fit();
+      return str_ditype;
+      // return llvm::DICompositeType::buildODRType(
+      //     llvm, *llvm::MDString::get(llvm, t.ptr.getTypename()),
+      //     llvm::dwarf::Tag::DW_TAG_structure_type,
+      //     llvm::MDString::get(llvm, t.ptr.getTypename()), file, n->pos.line,
+      //     file, nullptr, getBitsize(t), alignment, 0,
+      //     llvm::DINode::DIFlags::FlagZero, llvm::DINode::get(llvm, elements),
+      //     0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      //     nullptr);
     } else if (t.ptr == context.str_t) {
       if (t.is_ref == self::RefTypes::value) {
         return str_ditype;
@@ -665,7 +745,7 @@ namespace self {
 // must be returned by unique_ptr because module cannot be moved or copied
 
 std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::DIBuilder>>
-codegen(const self::ExprTree &ast, Context &c, llvm::LLVMContext &llvm,
+codegen(const self::Module &ast, Context &c, llvm::LLVMContext &llvm,
         std::filesystem::path file) {
   auto module = std::make_unique<llvm::Module>(file.string(), llvm);
   auto n = config_module(*module);
@@ -674,8 +754,8 @@ codegen(const self::ExprTree &ast, Context &c, llvm::LLVMContext &llvm,
                         llvm::DEBUG_METADATA_VERSION);
 
   auto di = std::make_unique<llvm::DIBuilder>(*module);
-  auto g = Generator(c, llvm, *module, *di, file);
-  for (auto &expr : ast) {
+  auto g = Generator(c, llvm, *module, *di, file, ast.struct_list);
+  for (auto &expr : ast.ast) {
     if (auto *function = dynamic_cast<self::FunBase *>(expr.get())) {
       g.generateFun(*function);
     } else if (auto *assign = dynamic_cast<self::FunctionCall *>(expr.get())) {

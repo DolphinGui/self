@@ -14,6 +14,6 @@ void compile(llvm::Module &, llvm::raw_pwrite_stream &file);
 
 llvm::Type *getType(const VarDeclaration &);
 std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::DIBuilder>>
-codegen(const self::ExprTree &ast, Context &c, llvm::LLVMContext &context,
+codegen(const self::Module &ast, Context &c, llvm::LLVMContext &context,
         std::filesystem::path file);
 } // namespace self

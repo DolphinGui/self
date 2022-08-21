@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
-#include <iostream>
 #include <iterator>
 #include <stdexcept>
 #include <string_view>
@@ -117,13 +116,16 @@ struct Context {
       detail::assignaddr, true);
 };
 
+struct StructDef;
 struct Module {
-  Module(Index &&i, ExprTree &&tree, ErrorList &&errs)
+  Module(Index &&i, ExprTree &&tree, ErrorList &&errs,
+         std::vector<const StructDef *> &&list)
       : global_context(std::move(i)), ast(std::move(tree)),
-        errs(std::move(errs)) {}
+        errs(std::move(errs)), struct_list(std::move(list)) {}
   Index global_context;
   ExprTree ast;
   ErrorList errs;
+  std::vector<const StructDef *> struct_list;
 };
 
 struct BuiltinTypeLit : public LiteralImpl<BuiltinTypeRef, BuiltinTypeLit> {

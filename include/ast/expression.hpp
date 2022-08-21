@@ -22,7 +22,7 @@ using TokenView = std::string_view;
 struct Type {
   virtual TokenView getTypename() const noexcept = 0;
   friend bool operator==(const Type &lhs, const Type &rhs) {
-    return lhs.getTypename() == rhs.getTypename();
+    return &lhs == &rhs;
   }
 };
 enum struct RefTypes { value, ref };
@@ -92,6 +92,7 @@ struct TypePtr {
     }
     return result;
   }
+  bool operator!() const noexcept { return !ptr; }
 };
 
 struct Pos {
@@ -121,6 +122,10 @@ struct ExprBase {
   virtual bool isCompiletime() const noexcept { return false; }
   virtual ExprPtr clone() const = 0;
   virtual void visit(ExprVisitor &, void *data) const = 0;
+  bool isExternal() const noexcept {
+    return qualifiers == Qualifiers::qImport ||
+           qualifiers == Qualifiers::qExport;
+  }
 };
 
 template <typename T, typename... Args>
@@ -170,18 +175,18 @@ template <typename Derive> struct ExprImpl : public ExprBase {
   }
 };
 
-template <typename Derive> struct NameMangling {
-  static std::string mangle(std::string_view t) {
+template <typename Derive> struct NameQualification {
+  static std::string qualify(std::string_view t) {
     std::string name = Derive::prefix;
     name.append(t);
     return name;
   }
-  static std::string demangle(std::string_view t) {
+  static std::string dequalify(std::string_view t) {
     auto result = std::string(t);
     return std::string(t.substr(std::strlen(Derive::prefix)));
   }
-  Token getDemangledName() const noexcept {
-    return demangle(static_cast<const Derive &>(*this).getName());
+  Token getRawName() const noexcept {
+    return dequalify(static_cast<const Derive &>(*this).getName());
   }
 };
 using ExprRef = std::reference_wrapper<ExprBase>;

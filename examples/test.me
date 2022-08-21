@@ -1,13 +1,13 @@
 extern "C" import "../stdlib/include/io.h"
 
-fun print(a: i64){
-  var b = a
-  printnum(b)
+var pair = struct{
+  var num: i64
+  var string: str
 }
 
 fun main()->i64{
-  var a = 'string'
-  selfprint(a)
-  print(32)
+  var a = pair(12, 'hi')
+  selfprint(a.string)
+  printnum(a.num)
   return 0
 }

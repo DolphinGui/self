@@ -2,6 +2,7 @@
 #include <llvm/CodeGen/GCMetadata.h>
 #include <llvm/CodeGen/GCMetadataPrinter.h>
 #include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -57,20 +58,19 @@ int main() {
   auto m = Module("this is a module name I guess", llvm);
   auto int_t = Type::getInt64Ty(llvm);
   auto ptr_t = PointerType::get(llvm, 0);
+  auto struct_t = StructType::get(llvm, {int_t, int_t});
+
   auto main = Function::Create(FunctionType::get(int_t, false),
                                GlobalValue::ExternalLinkage, "main", m);
   auto block = BasicBlock::Create(llvm, "entry", main);
   auto builder = IRBuilder<>(llvm);
   builder.SetInsertPoint(block);
-  auto a = builder.CreateAlloca(int_t);
+
   auto int_lit = ConstantInt::get(int_t, APInt(64, 123, true));
-  builder.CreateStore(int_lit, a);
-  auto b = builder.CreateAlloca(PointerType::get(llvm, 0));
-  builder.CreateStore(a, b);
-  // builder.CreateCall(printer, a);
-  auto loadb = builder.CreateLoad(ptr_t, b);
-  // builder.CreateCall(printer, loadb);
+  auto a = builder.CreateAlloca(struct_t);
+  // auto member1 = builder.createg
   builder.CreateRet(int_lit);
+
   m.print(outs(), nullptr);
   legacy::PassManager pass;
   std::error_code e;
