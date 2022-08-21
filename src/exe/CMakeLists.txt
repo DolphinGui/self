@@ -1,0 +1,10 @@
+add_executable(selfc selfc.cpp)
+target_include_directories(selfc PRIVATE ${CMAKE_SOURCE_DIR}/include)
+set_property(TARGET selfc PROPERTY CXX_STANDARD 20)
+target_link_libraries(selfc selfparse selfgen argparse::argparse fmt::fmt)
+
+if(WIN32)
+  target_compile_definitions(selfc SELF_WINDOWS)
+else()
+  target_compile_definitions(selfc PRIVATE SELF_UNIX)
+endif()

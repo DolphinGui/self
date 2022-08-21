@@ -1,0 +1,5 @@
+add_subdirectory(codegen)
+add_subdirectory(codeparser)
+add_subdirectory(ffiparser)
+add_subdirectory(ast)
+add_subdirectory(exe)
