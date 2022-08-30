@@ -1,6 +1,6 @@
 add_library(selfparse
 lexer.cpp
-parser.cpp externs.cpp structs.cpp blocks.cpp expressions.cpp)
+parser.cpp)
 target_include_directories(selfparse 
 PUBLIC ${CMAKE_SOURCE_DIR}/include 
 PRIVATE ${CMAKE_SOURCE_DIR})
