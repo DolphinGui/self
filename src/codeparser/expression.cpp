@@ -44,9 +44,9 @@ void processTuples(GlobalParser &g, self::ExprTree &tree,
 }
 
 template <typename T, bool pre = true, bool post = true>
-auto processFunction(GlobalParser &g, auto &it, bool not_a_member,
-                     auto lhsrhsinc, auto cond, auto cleanup, auto insert,
-                     auto coerce, self::Index &context) {
+auto processFunction(auto &it, bool not_a_member, auto lhsrhsinc, auto cond,
+                     auto cleanup, auto insert, auto coerce,
+                     self::Index &context) {
   if (auto *t = dynamic_cast<self::UnevaluatedExpression *>(it->get())) {
     auto lhs = it, rhs = it;
     lhsrhsinc(lhs, rhs);
@@ -70,13 +70,14 @@ auto processFunction(GlobalParser &g, auto &it, bool not_a_member,
       }
     }
     if (!no_coerce.empty()) {
-      g.errReport(no_coerce.size() == 1, "ambiguous operator call");
+      errReport(no_coerce.size() == 1, it->get()->pos,
+                "ambiguous operator call");
       coerce(*no_coerce.back(), *lhs, *rhs);
       auto result = insert(no_coerce.back(), lhs, rhs, no_coerce.back()->pos);
       cleanup(lhs, rhs);
       *it = std::move(result);
     } else if (!coerced.empty()) {
-      g.errReport(coerced.size() == 1, "ambiguous operator call");
+      errReport(coerced.size() == 1, it->get()->pos, "ambiguous operator call");
       coerce(*coerced.back(), *lhs, *rhs);
       auto result = insert(coerced.back(), lhs, rhs, coerced.back()->pos);
       cleanup(lhs, rhs);
@@ -85,29 +86,29 @@ auto processFunction(GlobalParser &g, auto &it, bool not_a_member,
   }
 }
 
-auto expectLookahead(GlobalParser &g, auto it, auto &container,
-                     std::string_view error) -> decltype(it) {
+auto expectLookahead(self::Pos p, auto it, auto &container, std::string error)
+    -> decltype(it) {
   auto ahead = lookahead(it, container);
-  g.errReport(ahead.has_value(), error);
+  errReport(ahead.has_value(), p, error);
   return *ahead;
 }
 
 template <typename To>
-To expectCast(GlobalParser &g, auto *from, std::string_view message) {
+To expectCast(self::Pos p, auto *from, std::string message) {
   static_assert(std::is_pointer_v<To>,
                 "type To must be either reference or pointer.");
   auto to = dynamic_cast<To>(from);
-  g.errReport(to, message);
+  errReport(to, p, message);
   return to;
 }
 
 template <typename To>
-To expectCast(GlobalParser &g, auto &from, std::string_view message) {
+To expectCast(self::Pos p, auto &from, std::string message) {
   static_assert(std::is_reference_v<To>,
                 "type To must be either reference or pointer.");
   using T = std::remove_reference_t<To>;
   auto to = dynamic_cast<T *>(&from);
-  g.errReport(to, message);
+  errReport(to, p, message);
   return *to;
 }
 enum struct coerceResult { match, coerce, mismatch };
@@ -184,7 +185,8 @@ bool coerceType(self::ExprPtr &e, self::TypePtr type) {
   return e->getType() == type;
 }
 
-self::FunctionDef *findCtor(GlobalParser &g, self::StructDef &structure,
+self::FunctionDef *findCtor(self::Pos p, self::Context &c,
+                            self::StructDef &structure,
                             std::span<self::ExprBase *> args) {
   auto candidates =
       structure.context->localEqualRange(self::FunctionDef::qualify("struct"));
@@ -194,38 +196,38 @@ self::FunctionDef *findCtor(GlobalParser &g, self::StructDef &structure,
     auto &ctor = dynamic_cast<self::FunctionDef &>(f.get());
     if (ctor.argcount() != args.size())
       continue;
-    tryCoerceFun(g.c, args, ctor, ctor.arguments.end(), ctor.arguments.begin(),
+    tryCoerceFun(c, args, ctor, ctor.arguments.end(), ctor.arguments.begin(),
                  perfect, coerced);
   }
   if (!perfect.empty()) {
-    g.errReport(perfect.size() == 1, "ambiguous constructor call");
+    errReport(perfect.size() == 1, p, "ambiguous constructor call");
     return perfect.back();
   } else {
-    g.errReport(!coerced.empty(), "No valid constructor calls");
-    g.errReport(coerced.size() == 1, "ambiguous constructor call");
+    errReport(!coerced.empty(), p, "No valid constructor calls");
+    errReport(coerced.size() == 1, p, "ambiguous constructor call");
     return coerced.back();
   }
 }
 
-self::ExprPtr ctorCheck(GlobalParser &g, auto it, auto &container, auto &var,
+self::ExprPtr ctorCheck(self::Context &c, auto it, auto &container, auto &var,
                         auto pos) {
   auto next = lookahead(it, container).value();
   // checks for constructor call
   auto *structure = dynamic_cast<self::StructLit *>(var.value);
-  if (var.getDecltype().ptr != &g.c.type_t || !*next || !structure) {
+  if (var.getDecltype().ptr != &c.type_t || !*next || !structure) {
     return self::makeExpr<self::VarDeref>(pos, var);
   }
   self::FunctionDef *ctor = nullptr;
   if (auto next_type = next->get()->getType(); next_type.ptr) {
     auto args = std::array{next->get()};
-    ctor = findCtor(g, structure->value, args);
+    ctor = findCtor(pos, c, structure->value, args);
     coerceType(*next, ctor->arguments.back()->getDecltype());
   } else if (auto *tuple = dynamic_cast<self::Tuple *>(next->get())) {
     std::vector<self::ExprBase *> exprs;
     exprs.reserve(tuple->members.size());
     std::for_each(tuple->members.begin(), tuple->members.end(),
                   [&](self::ExprPtr &e) { exprs.push_back(e.get()); });
-    ctor = findCtor(g, structure->value, exprs);
+    ctor = findCtor(pos, c, structure->value, exprs);
     auto arg_pack =
         self::makeExpr<self::ArgPack>(tuple->pos, std::move(*tuple));
     auto decl = ctor->arguments.begin();
@@ -244,60 +246,61 @@ self::ExprPtr ctorCheck(GlobalParser &g, auto it, auto &container, auto &var,
   return result;
 }
 
-self::ExprPtr parseSymbol(GlobalParser &g, auto it, auto &container,
-                          self::Index &local) {
+self::ExprPtr parseSymbol(self::Pos p, self::Context &c, auto it,
+                          auto &container, self::Index &local) {
   auto pos = it->get()->pos;
   if (auto *maybe = dynamic_cast<self::UnevaluatedExpression *>(it->get());
       maybe && !maybe->isComplete()) {
     auto t = maybe->getToken();
     if (auto [is_int, number] = isInt(t); is_int) {
-      return self::makeExpr<self::IntLit>(pos, number, g.c);
+      return self::makeExpr<self::IntLit>(pos, number, c);
     } else if (auto str = isStr(t)) {
-      return self::makeExpr<self::StringLit>(pos, *str, g.c);
+      return self::makeExpr<self::StringLit>(pos, *str, c);
     } else if (auto boolean = isBool(t)) {
-      return self::makeExpr<self::BoolLit>(pos, *boolean, g.c);
-    } else if (self::BuiltinTypeLit::contains(t, g.c)) {
+      return self::makeExpr<self::BoolLit>(pos, *boolean, c);
+    } else if (self::BuiltinTypeLit::contains(t, c)) {
       return self::makeExpr<self::BuiltinTypeLit>(
-          pos, self::BuiltinTypeLit::get(t, g.c));
+          pos, self::BuiltinTypeLit::get(t, c));
     } else if (auto varname = self::VarDeclaration::qualify(t);
                local.contains(varname)) {
-      g.errReport(local.isUnique(varname), "ODR var declaration rule violated");
+      errReport(local.isUnique(varname), p,
+                "ODR var declaration rule violated");
       auto &var =
           dynamic_cast<self::VarDeclaration &>(local.find(varname)->get());
-      return ctorCheck(g, it, container, var, pos);
+      return ctorCheck(c, it, container, var, pos);
     }
   }
   return std::move(*it);
 }
 
 template <typename T>
-std::unique_ptr<T> upCast(GlobalParser &g, self::ExprPtr &&unique) {
+std::unique_ptr<T> upCast(self::Pos p, self::ExprPtr &&unique) {
   auto *ptr = unique.get();
-  auto *n = expectCast<T *>(g, ptr, "upcasting failed");
+  auto *n = expectCast<T *>(p, ptr, "upcasting failed");
   ptr = unique.release();
   return std::unique_ptr<T>(n);
 }
 
-void resolveMembers(GlobalParser &g, self::ExprTree &container) {
+void resolveMembers(self::Pos p, self::ExprTree &container) {
   for (auto it = container.begin(); it != container.end(); ++it) {
     if (auto *t = dynamic_cast<self::UnevaluatedExpression *>(it->get());
         t && t->getToken() == ".") {
       auto behind = lookbehind(it, container).value();
       auto &behind_ptr =
-          expectCast<self::VarDeref &>(g, **behind,
+          expectCast<self::VarDeref &>(p, **behind,
                                        "Dot operator expects a variable "
                                        "dereference to the left");
       auto &struct_def = expectCast<const self::StructDef &>(
-          g, *behind_ptr.definition.value->getType().ptr,
+          p, *behind_ptr.definition.value->getType().ptr,
           "Dot operator should be used on structure type");
-      auto ahead = expectLookahead(g, it, container, "Expected member name");
+      auto ahead = expectLookahead(p, it, container, "Expected member name");
       auto &ahead_e = expectCast<self::UnevaluatedExpression &>(
-          g, **ahead, "Unknown parsing error: Uneval expected");
+          p, **ahead, "Unknown parsing error: Uneval expected");
       auto ahead_token = ahead_e.getToken();
       auto ahead_pos = ahead->get()->pos;
       auto n = self::VarDeclaration::qualify(ahead_token);
       if (auto v = struct_def.context->findLocally(n)) {
-        auto structure = upCast<self::VarDeref>(g, std::move(*behind));
+        auto structure = upCast<self::VarDeref>(p, std::move(*behind));
         auto &var = dynamic_cast<self::VarDeclaration &>(v->get());
         self::ExprPtr n = self::makeExpr<self::MemberDeref>(
             ahead_pos, var, std::move(structure), struct_def);
@@ -305,9 +308,9 @@ void resolveMembers(GlobalParser &g, self::ExprTree &container) {
       } else if (auto f = struct_def.context->findLocally(
                      self::FunctionDef::qualify(ahead_token))) {
         auto &fun = dynamic_cast<self::FunctionDef &>(v->get());
-        g.errReport(fun.arguments.front()->getRawName() == "this",
-                    "Object-oriented-style function calls require 'this' "
-                    "parameter as first parameter");
+        errReport(fun.arguments.front()->getRawName() == "this", p,
+                  "Object-oriented-style function calls require 'this' "
+                  "parameter as first parameter");
         auto arg_list = self::makeExpr<self::ArgPack>(ahead->get()->pos);
         arg_list->members.reserve(fun.argcount());
         arg_list->members.push_back(std::move(*behind));
@@ -420,13 +423,13 @@ self::ExprPtr GlobalParser::evaluateTree(self::ExprTree &tree,
         continue;
       }
     }
-    *it = parseSymbol(*this, it, tree, local);
+    *it = parseSymbol(self::Pos{0, 0}, c, it, tree, local);
   }
-  resolveMembers(*this, tree); // clang-format off
+  resolveMembers(self::Pos{0, 0}, tree); // clang-format off
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunused-parameter"
     for (auto it = tree.begin(); it != tree.end(); ++it) {
-      processFunction<self::FunctionDef>(*this,
+      processFunction<self::FunctionDef>(
           it, true, [](auto &lhs, auto &rhs) { ++rhs; },
           //todo add type checking to fun param
           [](auto *fun, auto lhs, auto rhs,
@@ -496,8 +499,7 @@ self::ExprPtr GlobalParser::evaluateTree(self::ExprTree &tree,
   // left-right associative pass
   for (auto it = tree.begin(); it != tree.end(); ++it) {
     processFunction<self::OperatorDef>(
-        *this, it, true, [](auto &lhs, auto &rhs) { --lhs, ++rhs; },
-        binCondition,
+        it, true, [](auto &lhs, auto &rhs) { --lhs, ++rhs; }, binCondition,
         [&](auto lhs, auto rhs) {
           tree.erase(rhs);
           it = tree.erase(lhs);
@@ -508,15 +510,14 @@ self::ExprPtr GlobalParser::evaluateTree(self::ExprTree &tree,
   // right-left associative pass
   for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
     processFunction<self::OperatorDef>(
-        *this, it, false, [](auto &lhs, auto &rhs) { ++lhs, --rhs; },
-        binCondition,
+        it, false, [](auto &lhs, auto &rhs) { ++lhs, --rhs; }, binCondition,
         [&](auto lhs, auto rhs) {
           tree.erase(rhs.base());
           it = std::make_reverse_iterator(++tree.erase(--lhs.base()));
         },
         binInsert, bin_coerce, local);
   }
-  errReport(tree.size() == 1, "tree is not fully resolved");
+  errReport(tree.size() == 1, tree.pos, "tree is not fully resolved");
   return std::move(tree.back());
 }
 } // namespace self::detail::parser

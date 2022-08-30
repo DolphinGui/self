@@ -17,7 +17,7 @@ retry:
         syntax_tree.push_back(parseVar(++t, name, global));
       } else if (*t == fun_t) {
         auto name = *++t;
-        errReport(notReserved(name), "function name is reserved");
+        errReport(notReserved(name), t.coord(), "function name is reserved");
         auto f = parseFun(++t, name, global);
         if (f->body_defined) {
           f->qualifiers = self::Qualifiers::qExport;
@@ -30,11 +30,12 @@ retry:
       } else if (*t == "extern") {
         processExtern(++t, syntax_tree);
       } else {
-        errReport(self::reserved::isEndl(*t++), "invalid expression");
+        errReport(self::reserved::isEndl(*t), t.coord(), "invalid expression");
+        ++t;
       }
     }
-  } catch (std::runtime_error e) {
-    err.errors.push_back(self::Error{t.col, t.line, e.what()});
+  } catch (const ErrException &e) {
+    err.errors.push_back(self::Error{t.col, t.line, e.what});
     while (*t != ";")
       ++t;
     goto retry;

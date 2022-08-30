@@ -81,8 +81,14 @@ constexpr auto notReserved = [](auto t) {
 
 struct ErrException {
   size_t col, line;
-  std::string_view what;
+  std::string what;
 };
+
+inline void errReport(bool condition, Pos p, std::string message) {
+  if (!condition) {
+    throw ErrException{p.col, p.line, std::move(message)};
+  }
+}
 
 struct TokenIt {
   TokenIt(self::LexedFileRef &where) : where(where), col(1), line(1) {}
@@ -151,13 +157,6 @@ struct GlobalParser {
   self::ErrorList &err;
   std::vector<const self::StructDef *> &struct_list;
 
-  void errReport(bool condition, std::string_view message) {
-    if (!condition) {
-      err_string = message;
-      throw std::runtime_error(err_string);
-    }
-  }
-
   self::ExprPtr evaluateTree(self::ExprTree &tree, self::Index &local);
 
   using callback = std::function<void(self::ExprTree &)>;
@@ -180,7 +179,7 @@ struct GlobalParser {
 
   std::unique_ptr<self::Block> forceBlock(TokenIt &t, self::Block &parent);
 
-  void parseIf(TokenIt &t, self::Block &body) ;
+  void parseIf(TokenIt &t, self::Block &body);
 
   void parseWhile(TokenIt &t, self::Block &body);
 

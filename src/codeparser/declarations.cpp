@@ -29,7 +29,7 @@ std::unique_ptr<self::StructLit> makeStruct(GlobalParser &g, TokenIt &t,
   static unsigned int id = 0;
   auto identity = std::string("struct");
   identity.append(std::to_string(id++));
-  g.errReport(*t == "{" || *t == "(", "Expected a \"{\" or \"(\"");
+  errReport(*t == "{" || *t == "(", t.coord(), "Expected a \"{\" or \"(\"");
   auto p = t.coord();
   if (*t == "(") {
     ++t;
@@ -39,7 +39,7 @@ std::unique_ptr<self::StructLit> makeStruct(GlobalParser &g, TokenIt &t,
                                              g.c);
     } else {
       auto [success, size] = isInt(*t++);
-      g.errReport(success, "Expected integer or \")\"");
+      errReport(success, t.coord(), "Expected integer or \")\"");
       return self::makeExpr<self::StructLit>(p, self::StructDef(size, parent),
                                              g.c);
     }
@@ -52,11 +52,11 @@ std::unique_ptr<self::StructLit> makeStruct(GlobalParser &g, TokenIt &t,
         result.body.push_back(g.parseVar(++t, name, *result.context));
       } else if (*t == "fun") {
         auto name = *++t;
-        g.errReport(notReserved(name), "function name is reserved");
+        errReport(notReserved(name), t.coord(), "function name is reserved");
         result.body.push_back(g.parseFun(++t, name, *result.context));
       } else {
-        g.errReport(self::reserved::isEndl(*t),
-                    "expected a function or variable declaration.");
+        errReport(self::reserved::isEndl(*t), t.coord(),
+                  "expected a function or variable declaration.");
         ++t;
       }
     }
@@ -73,20 +73,23 @@ namespace self::detail::parser {
 std::unique_ptr<self::FunctionDef>
 GlobalParser::parseFun(TokenIt &t, self::TokenView name, self::Index &parent) {
   auto curr = self::makeExpr<self::FunctionDef>(t.coord(), name, parent);
-  errReport(*t++ == "(", "\"(\" expected");
+  errReport(*t == "(", t.coord(), "\"(\" expected");
+  ++t;
   while (*t != ")") {
-    errReport(notReserved(*t),
+    errReport(notReserved(*t), t.coord(),
               "reserved Token cannot be used as parameter name");
     curr->arguments.emplace_back(
         self::makeExpr<self::VarDeclaration>(t.coord(), *t++));
-    errReport(*t++ == ":", "\":\" expected here");
+    errReport(*t == ":", t.coord(), "\":\" expected here");
+    ++t;
     constexpr auto commaOrParen = [](self::TokenView t) {
       return t == "," || t == ")";
     };
     auto e = parseExpr(t, parent, nullptr, commaOrParen);
     auto type = self::getLiteralType(*e);
     curr->arguments.back()->type_ref = {&type.ptr, type.is_ref};
-    errReport(*t == ")" || *t == ",", "\")\" or \",\" expected");
+    errReport(*t == ")" || *t == ",", t.coord(), "\")\" or \",\" expected");
+    ++t;
     if (*t == ")")
       break;
     else
@@ -117,7 +120,7 @@ GlobalParser::parseFun(TokenIt &t, self::TokenView name, self::Index &parent) {
           if (!type.ptr) {
             type = ret->getRetType(c);
           } else {
-            errReport(type != ret->getRetType(c),
+            errReport(type != ret->getRetType(c), t.coord(),
                       "Cannot deduce return type of function.");
           }
         }
@@ -143,7 +146,7 @@ void GlobalParser::parseIf(TokenIt &t, self::Block &body) {
   if_statement->condition =
       parseExpr(t, body.contexts, nullptr,
                 [](self::TokenView t) -> bool { return t == ";" || t == "{"; });
-  errReport(if_statement->condition->getType().ptr == &c.bool_t,
+  errReport(if_statement->condition->getType().ptr == &c.bool_t, t.coord(),
             "if condition expression is supposed to be boolean.");
   consumeNullExpr(t);
   if_statement->block = forceBlock(t, body);
@@ -175,7 +178,8 @@ void GlobalParser::parseWhile(TokenIt &t, self::Block &body) {
   if (condition == nullptr) {
     is_do = true;
     ++t;
-    errReport(*t == self::reserved::while_t, "expected a 'while' after a do");
+    errReport(*t == self::reserved::while_t, t.coord(),
+              "expected a 'while' after a do");
     ++t;
     condition = parseExpr(t, body.contexts);
     ++t;
@@ -190,7 +194,7 @@ self::ExprPtr GlobalParser::parseVar(TokenIt &t, self::TokenView name,
   if (!notReserved(name)) {
     std::stringstream err;
     err << "Token " << name << " is reserved";
-    errReport(false, err.str());
+    errReport(false, t.coord(), err.str());
   }
   auto curr = self::makeExpr<self::VarDeclaration>(t.coord(), name);
   if (*t == ":") {
@@ -201,7 +205,8 @@ self::ExprPtr GlobalParser::parseVar(TokenIt &t, self::TokenView name,
     context.insert({curr->getName(), std::ref(*curr)});
     return curr;
   } else {
-    errReport(notReserved(*t), "non-reserved Token expected in expression");
+    errReport(notReserved(*t), t.coord(),
+              "non-reserved Token expected in expression");
     context.insert({curr->getName(), std::ref(*curr)});
     return parseExpr(t, context, [&](self::ExprTree &tree) {
       tree.push_back(std::move(curr));
