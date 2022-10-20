@@ -137,8 +137,7 @@ coerceResult needCoerce(self::Context &c, self::ExprBase *e,
     } else if (var->getDecltype() == type) {
       return match;
     }
-  } else if (const auto *uneval =
-                 dynamic_cast<const self::UnevaluatedExpression *>(e)) {
+  } else if (dynamic_cast<const self::UnevaluatedExpression *>(e)) {
     return coerce;
   }
 
@@ -425,39 +424,36 @@ self::ExprPtr GlobalParser::evaluateTree(self::ExprTree &tree,
     }
     *it = parseSymbol(self::Pos{0, 0}, c, it, tree, local);
   }
-  resolveMembers(self::Pos{0, 0}, tree); // clang-format off
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wunused-parameter"
-    for (auto it = tree.begin(); it != tree.end(); ++it) {
-      processFunction<self::FunctionDef>(
-          it, true, [](auto &lhs, auto &rhs) { ++rhs; },
-          //todo add type checking to fun param
-          [](auto *fun, auto lhs, auto rhs,
-             auto &perfect, auto& less_than) {
-            if (fun->argcount() == tuple_count(rhs->get())) {
-              perfect.push_back(fun);
-              return true;
-            }
-            return false;
-          },
-          [&](auto lhs, auto rhs) { tree.erase(rhs); },
-          [&](const self::FunctionDef *fun, auto lhs, auto rhs, self::Pos p) {
-            auto result = self::makeExpr<self::FunctionCall>(p,*fun);
-            if (auto *tuple = dynamic_cast<self::Tuple *>(rhs->get())) {
-              result->rhs =
-                  std::make_unique<self::ArgPack>(std::move(*tuple));
-            } else {
-              result->rhs = std::move(*rhs);
-            }
-            return result;
-          }, [](const self::FunctionDef& fun, auto& lhs, auto& rhs){
-            int i = 0;
-            for_tuple(rhs, [&]{
-              return fun.arguments.at(i++)->getDecltype();},
-              [](self::ExprPtr& e, auto type){coerceType(e, type);});
-          }, local);
-    }
-    #pragma clang diagnostic pop // clang-format on
+  resolveMembers(self::Pos{0, 0}, tree);
+  for (auto it = tree.begin(); it != tree.end(); ++it) {
+    processFunction<self::FunctionDef>(
+        it, true, [](auto &, auto &rhs) { ++rhs; },
+        // todo add type checking to fun param
+        [](auto *fun, auto, auto rhs, auto &perfect, auto &) {
+          if (fun->argcount() == tuple_count(rhs->get())) {
+            perfect.push_back(fun);
+            return true;
+          }
+          return false;
+        },
+        [&](auto, auto rhs) { tree.erase(rhs); },
+        [&](const self::FunctionDef *fun, auto, auto rhs, self::Pos p) {
+          auto result = self::makeExpr<self::FunctionCall>(p, *fun);
+          if (auto *tuple = dynamic_cast<self::Tuple *>(rhs->get())) {
+            result->rhs = std::make_unique<self::ArgPack>(std::move(*tuple));
+          } else {
+            result->rhs = std::move(*rhs);
+          }
+          return result;
+        },
+        [](const self::FunctionDef &fun, auto &, auto &rhs) {
+          int i = 0;
+          for_tuple(
+              rhs, [&] { return fun.arguments.at(i++)->getDecltype(); },
+              [](self::ExprPtr &e, auto type) { coerceType(e, type); });
+        },
+        local);
+  }
 
   auto binCondition = [&](auto *op, auto lhs, auto rhs, auto &no_coerce,
                           auto &coerce_r) {

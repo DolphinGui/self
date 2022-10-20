@@ -42,7 +42,7 @@ struct ExprTree : public ExprImpl<ExprTree>, public ExpressionList {
   void complete_types();
   ExprTree() = default;
   ExprTree(ExprTree &&other) : ExpressionList(std::move(other)) {}
-  ExprTree(const ExprTree &other) {
+  ExprTree(const ExprTree &other) : ExprImpl<ExprTree>(), ExpressionList() {
     std::for_each(other.cbegin(), other.cend(),
                   [&](const ExprPtr &p) { this->push_back(p->clone()); });
   }
