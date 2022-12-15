@@ -64,14 +64,14 @@
       "type": "lldb",
       "request": "launch",
       "name": "integration_test",
-      "program": "${workspaceFolder}/build/integration_test",
+      "program": "${workspaceFolder}/build/tests/integration_test",
       "cwd": "${workspaceFolder}/build"
     },
     {
       "type": "gdb",
       "request": "launch",
       "name": "integration_test-gdb",
-      "target": "${workspaceFolder}/build/integration_test",
+      "target": "${workspaceFolder}/build/tests/integration_test",
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "parseText"
     },
