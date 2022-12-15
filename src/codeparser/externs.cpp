@@ -15,7 +15,7 @@ auto fileOpen(self::Pos loc, std::string path) {
 
 auto parseStrLit(TokenIt &t, std::string err) {
   auto a = isStr(*t);
-  errReport(!a->empty(), t.coord(), std::move(err));
+  errReport(a.has_value() && !a->empty(), t.coord(), std::move(err));
   std::string unconvert;
   unconvert.reserve(a->size());
   std::for_each(a->begin(), a->end(),
