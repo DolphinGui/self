@@ -43,12 +43,16 @@ auto get_stdlib() {
 std::string readFile() {
   std::string contents;
   auto file = std::ifstream("../examples/test.me", std::ios::binary);
+  if (file.bad())
+    throw std::runtime_error("file not found");
   file.ignore(std::numeric_limits<std::streamsize>::max());
   auto size = file.gcount();
   contents.reserve(size);
   file.seekg(std::ios::beg);
   std::copy_n(std::istreambuf_iterator(file), size,
               std::back_inserter(contents));
+  if (contents.empty())
+    throw std::runtime_error("file empty");
   return contents;
 }
 
