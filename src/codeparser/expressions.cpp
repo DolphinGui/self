@@ -240,8 +240,9 @@ auto processFunction(auto &it, bool not_a_member, auto lhsrhsinc, auto cond,
         }
       }
     };
-    search(self::pairRange(context.equalRange(T::qualify(t->getToken()))));
     // argument dependent lookup
+    search(self::pairRange(context.equalRange(T::qualify(t->getToken()))));
+    // constructor search
     for (auto &hs : {lhs, rhs}) {
       if (auto *str =
               dynamic_cast<const self::StructDef *>(hs->get()->getType().ptr)) {
@@ -317,39 +318,36 @@ self::ExprPtr evaluateTree(self::Context &c, self::ExprTree &tree,
     }
     *it = parseSymbol(it, tree, local, c);
   }
-  resolveMembers(tree); // clang-format off
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wunused-parameter"
-    for (auto it = tree.begin(); it != tree.end(); ++it) {
-      processFunction<self::FunctionDef>(
-          it, true, [](auto &lhs, auto &rhs) { ++rhs; },
-          //todo add type checking to fun param
-          [](auto *fun, auto lhs, auto rhs,
-             auto &perfect, auto& less_than) {
-            if (fun->argcount() == tuple_count(rhs->get())) {
-              perfect.push_back(fun);
-              return true;
-            }
-            return false;
-          },
-          [&](auto lhs, auto rhs) { tree.erase(rhs); },
-          [&](const self::FunctionDef *fun, auto lhs, auto rhs, self::Pos p) {
-            auto result = self::makeExpr<self::FunctionCall>(p,*fun);
-            if (auto *tuple = dynamic_cast<self::Tuple *>(rhs->get())) {
-              result->rhs =
-                  std::make_unique<self::ArgPack>(std::move(*tuple));
-            } else {
-              result->rhs = std::move(*rhs);
-            }
-            return result;
-          }, [](const self::FunctionDef& fun, auto& lhs, auto& rhs){
-            int i = 0;
-            for_tuple(rhs, [&]{
-              return fun.arguments.at(i++)->getDecltype();},
-              [](self::ExprPtr& e, auto type){coerceType(e, type);});
-          }, local);
-    }
-    #pragma clang diagnostic pop // clang-format on
+  resolveMembers(tree);
+  for (auto it = tree.begin(); it != tree.end(); ++it) {
+    processFunction<self::FunctionDef>(
+        it, true, [](auto &, auto &rhs) { ++rhs; },
+        // todo add type checking to fun param
+        [](auto *fun, auto, auto rhs, auto &perfect, auto &) {
+          if (fun->argcount() == tuple_count(rhs->get())) {
+            perfect.push_back(fun);
+            return true;
+          }
+          return false;
+        },
+        [&](auto, auto rhs) { tree.erase(rhs); },
+        [&](const self::FunctionDef *fun, auto, auto rhs, self::Pos p) {
+          auto result = self::makeExpr<self::FunctionCall>(p, *fun);
+          if (auto *tuple = dynamic_cast<self::Tuple *>(rhs->get())) {
+            result->rhs = std::make_unique<self::ArgPack>(std::move(*tuple));
+          } else {
+            result->rhs = std::move(*rhs);
+          }
+          return result;
+        },
+        [](const self::FunctionDef &fun, auto &, auto &rhs) {
+          int i = 0;
+          for_tuple(
+              rhs, [&] { return fun.arguments.at(i++)->getDecltype(); },
+              [](self::ExprPtr &e, auto type) { coerceType(e, type); });
+        },
+        local);
+  }
 
   auto binCondition = [&](auto *op, auto lhs, auto rhs, auto &no_coerce,
                           auto &coerce_r) {
