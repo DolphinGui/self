@@ -3,6 +3,7 @@
 #include "ast/unevaluated_expression.hpp"
 #include "lexer.hpp"
 #include "literals.hpp"
+#include <charconv>
 #include <cstdint>
 #include <stdexcept>
 
@@ -72,12 +73,12 @@ struct ErrException {
   std::string what;
 };
 
+// assumes ASCII numerals, might want to support other numeral types later
 inline std::optional<size_t> isInt(self::TokenView t) {
-  char *p = nullptr;
-  auto number = std::strtol(t.data(), &p, 0);
-  if (p == nullptr) {
+  size_t number = 0;
+  auto [ptr, ec] = std::from_chars(t.data(), t.data() + t.length(), number);
+  if (ec != std::errc())
     return number;
-  }
   return std::nullopt;
 }
 
@@ -132,12 +133,12 @@ inline void errReport(bool condition, Pos p, std::string message) {
   }
 }
 
-inline void errReport(bool condition, TokenIt t, std::string message) {
+inline void errReport(bool condition, TokenIt &t, std::string message) {
   errReport(condition, t.coord(), std::move(message));
   ++t;
 }
 
-inline void expectToken(TokenView tok, TokenIt t, std::string message) {
+inline void expectToken(TokenView tok, TokenIt &t, std::string message) {
   errReport(*t == tok, t.coord(), std::move(message));
   ++t;
 }
