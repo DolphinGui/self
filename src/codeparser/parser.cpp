@@ -13,7 +13,7 @@ bool coerceType(self::ExprPtr &e, self::TypePtr type) {
     if (!var->type_ref.ptr) {
       var->type_ref = type;
       if (type.depth == 0)
-        throw std::runtime_error("var coercion depth should not be 0");
+        throw ErrException{e->pos, "var coercion depth should not be 0"};
       --var->type_ref.depth;
       if (var->type_ref.depth == 0)
         var->type_ref.is_ref = self::RefTypes::value;
@@ -54,9 +54,9 @@ retry:
         errReport(self::reserved::isEndl(*t), t, "invalid expression");
       }
     }
-  } catch (std::runtime_error e) {
-    err.errors.push_back(self::Error{t.col, t.line, e.what()});
-    while (*t != ";")
+  } catch (const ErrException &e) {
+    err.errors.push_back(self::Error{t.col, t.line, e.what});
+    while (*t != "\03")
       ++t;
     goto retry;
   }
