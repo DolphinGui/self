@@ -32,6 +32,7 @@ constexpr auto link_command =
     "/usr/lib64/crtn.o -o {}";
 auto get_stdlib() {
   auto working = std::filesystem::current_path();
+  working.append("stdlib");
   for (auto &f : std::filesystem::directory_iterator(working)) {
     if (f.path().filename() == "libselfstd.a") {
       return f;
