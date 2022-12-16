@@ -191,7 +191,7 @@ void resolveMembers(self::ExprTree &container) {
       auto &struct_def = expectCast<const self::StructDef &>(
           *behind_ptr.definition.value->getType().ptr,
           "Dot operator should be used on structure type");
-      auto ahead = expectLookahead(it, container, "Expected member name");
+      auto ahead = expectLookahead(it, container);
       auto &ahead_e = expectCast<self::UnevaluatedExpression &>(
           **ahead, "Unknown parsing error: Uneval expected");
       auto ahead_token = ahead_e.getToken();

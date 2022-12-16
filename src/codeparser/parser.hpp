@@ -76,8 +76,8 @@ struct ErrException {
 // assumes ASCII numerals, might want to support other numeral types later
 inline std::optional<size_t> isInt(self::TokenView t) {
   size_t number = 0;
-  auto [ptr, ec] = std::from_chars(t.data(), t.data() + t.length(), number);
-  if (ec != std::errc())
+  auto [result, ec] = std::from_chars(t.data(), t.data() + t.length(), number);
+  if (ec == std::errc())
     return number;
   return std::nullopt;
 }
@@ -175,17 +175,16 @@ auto lookahead(auto it, auto &container) -> std::optional<decltype(it)> {
   return ++it;
 }
 
-auto lookbehind(auto it, auto container) -> std::optional<decltype(it)> {
+auto lookbehind(auto it, auto &container) -> std::optional<decltype(it)> {
   if (std::begin(container) == it)
     return std::nullopt;
   return --it;
 }
 
-auto expectLookahead(auto it, auto &container, std::string_view error)
-    -> decltype(it) {
+auto expectLookahead(auto it, auto &container) -> decltype(it) {
   auto ahead = lookahead(it, container);
-  if (ahead.has_value())
-    throw std::runtime_error(error.data());
+  if (!ahead.has_value())
+    throw std::runtime_error("expected token, end of container");
   return *ahead;
 }
 

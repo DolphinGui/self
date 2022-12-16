@@ -8,7 +8,7 @@
       "type": "gdb",
       "request": "launch",
       "name": "IR_test",
-      "target": "${workspaceRoot}/build/IR_test",
+      "target": "${workspaceRoot}/build/tests/IR_test",
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "parseText"
     },
@@ -17,7 +17,7 @@
       "type": "lldb",
       "request": "launch",
       "name": "selfc",
-      "program": "${workspaceFolder}/build/selfc",
+      "program": "${workspaceFolder}/build/tests/selfc",
       "args": [
         "test2.me",
         "libselfstd.a"
@@ -28,35 +28,28 @@
       "type": "lldb",
       "request": "launch",
       "name": "ffi_test",
-      "program": "${workspaceFolder}/build/ffi_test",
+      "program": "${workspaceFolder}/build/tests/ffi_test",
       "cwd": "${workspaceFolder}/build"
     },
     {
       "type": "lldb",
       "request": "launch",
       "name": "clang_parse",
-      "program": "${workspaceFolder}/build/clang_parse",
-      "cwd": "${workspaceFolder}/build"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "a.out",
-      "program": "${workspaceFolder}/build/a.out",
+      "program": "${workspaceFolder}/build/tests/clang_parse",
       "cwd": "${workspaceFolder}/build"
     },
     {
       "type": "lldb",
       "request": "launch",
       "name": "lex_test",
-      "program": "${workspaceFolder}/build/lex_test",
+      "program": "${workspaceFolder}/build/tests/lex_test",
       "cwd": "${workspaceFolder}/build"
     },
     {
       "type": "gdb",
       "request": "launch",
       "name": "lex_test-gdb",
-      "target": "${workspaceFolder}/build/lex_test",
+      "target": "${workspaceFolder}/build/tests/lex_test",
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "parseText"
     },
