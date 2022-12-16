@@ -247,6 +247,7 @@ private:
     auto block = llvm::BasicBlock::Create(llvm, "entry", result);
     auto builder = llvm::IRBuilder<>(llvm);
     builder.SetInsertPoint(block);
+    // default constructor
     if (name == "struct") {
       std::vector<llvm::Value *> args;
       args.reserve(fun.argcount());
@@ -262,6 +263,7 @@ private:
       }
       auto ret_value = builder.CreateLoad(ret_type, alloca);
       builder.CreateRet(ret_value);
+      // default assignment
     } else if (name == "=") {
       builder.CreateStore(result->getArg(1), result->getArg(0));
       builder.CreateRet(result->getArg(0));
@@ -695,14 +697,6 @@ private:
       }
       elements.shrink_to_fit();
       return str_ditype;
-      // return llvm::DICompositeType::buildODRType(
-      //     llvm, *llvm::MDString::get(llvm, t.ptr.getTypename()),
-      //     llvm::dwarf::Tag::DW_TAG_structure_type,
-      //     llvm::MDString::get(llvm, t.ptr.getTypename()), file, n->pos.line,
-      //     file, nullptr, getBitsize(t), alignment, 0,
-      //     llvm::DINode::DIFlags::FlagZero, llvm::DINode::get(llvm, elements),
-      //     0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-      //     nullptr);
     } else if (t.ptr == context.str_t) {
       if (t.is_ref == self::RefTypes::value) {
         return str_ditype;

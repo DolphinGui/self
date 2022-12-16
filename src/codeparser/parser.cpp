@@ -195,11 +195,12 @@ self::ExprPtr GlobalParser::parseVar(TokenIt &t, self::TokenView name,
 } // namespace detail::parser
 
 Module parse(LexedFileRef &in, Context &c) {
+  using namespace detail::parser;
   ErrorList e;
   std::vector<const self::StructDef *> list;
-  auto parser = detail::parser::GlobalParser(c, e, list);
+  auto parser = GlobalParser(c, e, list);
   auto root = Index(c.root);
-  auto ast = parser.process(detail::parser::TokenIt{in}, root);
+  auto ast = parser.process(TokenIt{in}, root);
   return Module(std::move(root), std::move(ast), std::move(e), std::move(list));
 }
 } // namespace self

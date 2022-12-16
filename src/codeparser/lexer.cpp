@@ -34,20 +34,12 @@ self::LexedFileRef parseToken(std::string &whole) {
   auto input = re2::StringPiece(whole);
   re2::StringPiece cur_token;
   TokenVec token_list;
-  std::vector<unsigned> line_pos;
-  line_pos.push_back(0);
   while (RE2::FindAndConsume(
-      &input, R"(((?:->|'.+?'|".+?")|""|''|[(){}[\];,:.\03]|[^\s(){};,[\]'":.\03]+))",
+      &input, R"(((?:->|'.*?'|".*?")|[(){}[\];,:.\03]|[^\s(){};,[\]'":.\03]+))",
       &cur_token)) {
-    token_list.push_back(std::string_view(cur_token.data(), cur_token.size()));
-    if (cur_token == "\n") {
-      auto pos = std::distance(static_cast<const char *>(whole.data()),
-                               cur_token.data());
-      line_pos.push_back(pos);
-    }
+    token_list.push_back(cur_token.ToString());
   }
-  line_pos.erase(line_pos.begin());
-  return {std::move(token_list), whole, std::move(line_pos)};
+  return {std::move(token_list), whole};
 }
 } // namespace detail
 Module parseFile(std::string &in, Context &c) {
