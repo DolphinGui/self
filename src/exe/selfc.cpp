@@ -6,6 +6,7 @@
 #include "fmt/format.h"
 #include "lexer.hpp"
 #include "utility/tmp_ostream.hpp"
+#include "utility/bumpalloc.hpp"
 
 #include <algorithm>
 #include <clang/Driver/Compilation.h>

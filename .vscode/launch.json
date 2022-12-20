@@ -5,6 +5,14 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "type": "lldb-mi",
+      "request": "launch",
+      "name": "bumpalloc",
+      "target": "${workspaceRoot}/build/tests/bumpalloc",
+      "cwd": "${workspaceRoot}/build",
+      "valuesFormatting": "parseText"
+    },
+    {
       "type": "gdb",
       "request": "launch",
       "name": "IR_test",
@@ -12,7 +20,6 @@
       "cwd": "${workspaceRoot}/build",
       "valuesFormatting": "parseText"
     },
-  
     {
       "type": "lldb",
       "request": "launch",

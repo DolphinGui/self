@@ -8,6 +8,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR})
 
 include(FetchContent)
 include(CheckCXXCompilerFlag)
+include(CTest)
 
 FetchContent_Declare(json
 URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.tar.xz)
@@ -20,8 +21,16 @@ GIT_TAG ba2e7c2f25047a6848f2baa9bc4cb700ea9dda84)
 FetchContent_Declare(fmt
 GIT_REPOSITORY https://github.com/fmtlib/fmt.git
 GIT_TAG c48be439f1ae03f2726e30ac93fce3a667dc4be2)
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG release-1.12.1
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 set(RE2_BUILD_TESTING OFF CACHE BOOL "enable testing for RE2" FORCE)
-FetchContent_MakeAvailable(json argparse re2 fmt)
+FetchContent_MakeAvailable(json argparse re2 fmt googletest)
+
+include(GoogleTest)
 
 if(NOT TARGET re2::re2)
   message(FATAL_ERROR "re2 has failed to build")
