@@ -48,7 +48,7 @@ retry:
         syntax_tree.push_back(parseExpr(t, global));
       } else if (*t == import_t) {
         processImport(++t, syntax_tree, global);
-      } else if (*t == "extern") {
+      } else if (*t == extern_t) {
         processExtern(++t, syntax_tree);
       } else {
         errReport(self::reserved::isEndl(*t), t, "invalid expression");
